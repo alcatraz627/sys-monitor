@@ -45,6 +45,14 @@ final class StatusItemController {
         }
     }
 
+    /// Swap the bar glyph style at runtime (settings change). Rebuilds the
+    /// renderer with new reserved-width and color rules, then redraws
+    /// against the current snapshot so the new look appears immediately.
+    func updateStyle(_ style: GlyphRenderer.Style) {
+        renderer = GlyphRenderer(style: style)
+        redraw(snapshot: store.snapshot)
+    }
+
     private func redraw(snapshot: MetricsSnapshot) {
         guard let button = statusItem.button else { return }
         button.image = renderer.render(snapshot: snapshot)

@@ -12,14 +12,30 @@ import SwiftUI
 final class PanelController {
 
     private let store: MetricsStore
+    private let settings: SettingsStore
     private let coordinator: SamplingCoordinator
     private weak var statusItem: NSStatusItem?
     private var panel: DropPanel?
     private var clickMonitor: Any?
 
-    init(store: MetricsStore, coordinator: SamplingCoordinator) {
+    /// Set after construction by the AppDelegate so the panel's "Settings…"
+    /// footer button has somewhere to dispatch. Captured weakly inside the
+    /// SwiftUI view so a dead controller doesn't keep settings alive.
+    var onShowSettings: (() -> Void)?
+
+    init(store: MetricsStore, settings: SettingsStore, coordinator: SamplingCoordinator) {
         self.store = store
+        self.settings = settings
         self.coordinator = coordinator
+    }
+
+    /// Close the panel without dismissing-via-event. Used by the settings
+    /// flow so the dropdown gets out of the way before the settings window
+    /// opens.
+    func close() {
+        removeClickMonitor()
+        panel?.orderOut(nil)
+        coordinator.enterIdleTier()
     }
 
     /// The status-item controller passes its `NSStatusItem` in so we can
@@ -45,11 +61,6 @@ final class PanelController {
         installClickMonitor()
     }
 
-    private func close() {
-        removeClickMonitor()
-        panel?.orderOut(nil)
-        coordinator.enterIdleTier()
-    }
 
     // MARK: - Build
 
@@ -67,8 +78,11 @@ final class PanelController {
         panel.backgroundColor = .clear
         panel.hasShadow = true
 
-        let root = PanelRootView()
-            .environmentObject(store)
+        let root = PanelRootView(
+            onShowSettings: { [weak self] in self?.onShowSettings?() }
+        )
+        .environmentObject(store)
+        .environmentObject(settings)
         panel.contentViewController = NSHostingController(rootView: root)
         return panel
     }

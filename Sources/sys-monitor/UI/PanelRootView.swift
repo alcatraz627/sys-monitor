@@ -6,14 +6,24 @@ import AppKit
 /// from the shared `MetricsStore` — no sampling here, just rendering.
 struct PanelRootView: View {
     @EnvironmentObject var store: MetricsStore
-    @State private var sortBy: ProcSort = .cpu
+    @EnvironmentObject var settings: SettingsStore
     /// While the user is hovering over the process list, we freeze the
     /// displayed ordering to whatever it was when the hover began. This
     /// stops rows from re-sorting out from under a click or scroll. When
     /// the hover ends, we drop back to the live ranking on the next tick.
     @State private var hoverFrozenOrder: [ProcSample]?
 
-    enum ProcSort { case cpu, mem }
+    let onShowSettings: () -> Void
+
+    /// The active sort. Bound to `settings.defaultSort` so the in-panel
+    /// segmented picker both reflects the user's saved preference AND
+    /// can override it for this session — toggling here writes through.
+    private var sortBy: SettingsStore.ProcSort { settings.defaultSort }
+    private func setSortBy(_ s: SettingsStore.ProcSort) { settings.defaultSort = s }
+
+    /// Local alias kept for the existing helper signatures (rank logic,
+    /// process row labels, etc.).
+    typealias ProcSort = SettingsStore.ProcSort
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -102,9 +112,12 @@ struct PanelRootView: View {
                     .font(DesignTokens.numericFont(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
-                Picker("", selection: $sortBy) {
-                    Text("CPU").tag(ProcSort.cpu)
-                    Text("MEM").tag(ProcSort.mem)
+                Picker("", selection: Binding(
+                    get: { sortBy },
+                    set: { setSortBy($0) }
+                )) {
+                    Text("CPU").tag(SettingsStore.ProcSort.cpu)
+                    Text("MEM").tag(SettingsStore.ProcSort.mem)
                 }
                 .pickerStyle(.segmented)
                 .frame(width: 100)
@@ -134,12 +147,14 @@ struct PanelRootView: View {
     }
 
     private var footer: some View {
-        HStack {
+        HStack(spacing: DesignTokens.Space.m) {
+            Button("Settings…") { onShowSettings() }
+                .buttonStyle(.borderless)
             Spacer()
             Button("Quit") { NSApp.terminate(nil) }
                 .buttonStyle(.borderless)
-                .font(DesignTokens.numericFont(size: 11))
         }
+        .font(DesignTokens.numericFont(size: 11))
     }
 
     private var divider: some View {
@@ -224,7 +239,9 @@ struct PanelRootView: View {
                 return a.pid < b.pid
             }
         }
-        return Array(sorted.prefix(25))
+        // Truncate to the user's preferred display count (clamped to a
+        // sane range by the settings stepper).
+        return Array(sorted.prefix(settings.processCount))
     }
 }
 

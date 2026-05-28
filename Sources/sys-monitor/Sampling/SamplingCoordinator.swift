@@ -104,6 +104,29 @@ public final class SamplingCoordinator: @unchecked Sendable {
         }
     }
 
+    /// Settings changed the idle cadence. If we're currently in idle tier,
+    /// re-schedule the timer to the new value (which also re-baselines —
+    /// the glyph blinks "—" once then resumes). If we're in open tier, the
+    /// new cadence takes effect on the next tier-return.
+    public func updateIdleCadenceSeconds(_ seconds: Double) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.idleCadenceSeconds = seconds
+            if self.activeTier == .idle { self.transitionToIdle() }
+        }
+    }
+
+    /// Settings changed the open cadence. If we're currently in open tier,
+    /// re-schedule + re-baseline. Otherwise the new value takes effect on
+    /// the next panel open.
+    public func updateOpenCadenceSeconds(_ seconds: Double) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.openCadenceSeconds = seconds
+            if self.activeTier == .open { self.transitionToOpen() }
+        }
+    }
+
     /// Stop everything cleanly. Called from `applicationWillTerminate`.
     public func shutdown() {
         queue.async { [weak self] in
