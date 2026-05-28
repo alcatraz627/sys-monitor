@@ -1,0 +1,222 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 420" font-family="ui-monospace, Menlo, Consolas, monospace">
+  <!-- ── Background ─────────────────────────────────────────────── -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0d1014"/>
+      <stop offset="1" stop-color="#1a1d22"/>
+    </linearGradient>
+    <linearGradient id="track" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#2c2f36"/>
+      <stop offset="1" stop-color="#262931"/>
+    </linearGradient>
+    <linearGradient id="green" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#3ddb84"/>
+      <stop offset="1" stop-color="#27c46e"/>
+    </linearGradient>
+    <linearGradient id="orange" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffa657"/>
+      <stop offset="1" stop-color="#ef8d3a"/>
+    </linearGradient>
+    <linearGradient id="red" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff6b6b"/>
+      <stop offset="1" stop-color="#e84a4a"/>
+    </linearGradient>
+    <filter id="softshadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="5"/>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="420" fill="url(#bg)" rx="14"/>
+
+  <!-- ── Faux macOS menu bar ────────────────────────────────────── -->
+  <rect x="0" y="0" width="1200" height="30" fill="#000" opacity="0.55"/>
+  <!-- left side: app menu placeholders -->
+  <g fill="#a8b0bd" font-size="11" opacity="0.7">
+    <text x="20" y="20" font-weight="700"></text>
+    <text x="50" y="20" font-weight="600">sys-monitor</text>
+    <text x="135" y="20">File</text>
+    <text x="172" y="20">Edit</text>
+    <text x="207" y="20">View</text>
+    <text x="244" y="20">Help</text>
+  </g>
+  <!-- right side: faux status items -->
+  <g fill="#a8b0bd" opacity="0.65">
+    <circle cx="980" cy="15" r="3"/>
+    <rect x="998" y="12" width="14" height="7" rx="1"/>
+    <rect x="1020" y="11" width="3" height="9" rx="1"/>
+    <rect x="1025" y="9"  width="3" height="11" rx="1"/>
+    <rect x="1030" y="7"  width="3" height="13" rx="1"/>
+    <rect x="1035" y="5"  width="3" height="15" rx="1"/>
+    <text x="1055" y="20" font-size="11">100%</text>
+    <text x="1090" y="20" font-size="11">8:05 PM</text>
+  </g>
+
+  <!-- ── The sys-monitor live glyph (the bar+% in the menu bar) ─── -->
+  <g transform="translate(900, 8)">
+    <!-- track -->
+    <rect x="0" y="6" width="22" height="14" fill="#3a3e47" rx="3"/>
+    <!-- fill — 38% load → green -->
+    <rect x="0" y="6" width="8" height="14" fill="url(#green)" rx="3"/>
+    <text x="28" y="20" font-size="12" font-weight="600" fill="#e7e9ef"
+          font-variant-numeric="tabular-nums">38%</text>
+  </g>
+  <!-- connector arrow from glyph to panel -->
+  <path d="M 915 32 L 925 50" stroke="#3ddb84" stroke-width="2" stroke-linecap="round" opacity="0.55"/>
+
+  <!-- ── Left: title block ─────────────────────────────────────── -->
+  <g transform="translate(64, 110)">
+    <text x="0" y="0" font-size="64" font-weight="800" fill="#e7e9ef"
+          letter-spacing="-1">sys-monitor</text>
+    <text x="0" y="36" font-size="18" fill="#8b95a8">
+      htop-inspired macOS menu-bar system monitor
+    </text>
+
+    <!-- 3 feature bullets -->
+    <g font-size="14" fill="#a8b0bd" transform="translate(0, 76)">
+      <g>
+        <circle cx="6" cy="6" r="4" fill="url(#green)"/>
+        <text x="20" y="10">live CPU readout in the menu bar — always on</text>
+      </g>
+      <g transform="translate(0, 24)">
+        <circle cx="6" cy="6" r="4" fill="url(#orange)"/>
+        <text x="20" y="10">click → htop-density panel: cores, memory, processes, I/O</text>
+      </g>
+      <g transform="translate(0, 48)">
+        <circle cx="6" cy="6" r="4" fill="url(#red)"/>
+        <text x="20" y="10">tiered sampling — &lt; 1% idle CPU, ~63 MB resident</text>
+      </g>
+    </g>
+
+    <!-- toolchain row -->
+    <g transform="translate(0, 178)" font-size="11" fill="#6b7384"
+       font-variant-numeric="tabular-nums">
+      <text x="0" y="0">Swift 5.9</text>
+      <text x="78" y="0">·</text>
+      <text x="92" y="0">macOS 13+</text>
+      <text x="170" y="0">·</text>
+      <text x="184" y="0">SwiftPM</text>
+      <text x="240" y="0">·</text>
+      <text x="254" y="0">no external deps</text>
+    </g>
+  </g>
+
+  <!-- ── Right: dropdown panel sketch ──────────────────────────── -->
+  <g transform="translate(680, 60)" filter="url(#softshadow)">
+    <rect x="0" y="0" width="460" height="340" fill="#1a1d22" opacity="0.4" rx="12"/>
+  </g>
+  <g transform="translate(680, 60)">
+    <rect x="0" y="0" width="460" height="340" fill="#22262d" rx="12"
+          stroke="#3a3e47" stroke-width="1"/>
+
+    <!-- CPU section -->
+    <g transform="translate(16, 18)">
+      <text x="0" y="10" font-size="10" font-weight="700" fill="#8b95a8"
+            letter-spacing="0.5">CPU</text>
+      <text x="428" y="10" text-anchor="end" font-size="12" font-weight="600"
+            fill="#e7e9ef" font-variant-numeric="tabular-nums">38%</text>
+      <!-- usage bar -->
+      <rect x="0" y="18" width="428" height="6" fill="#2c3038" rx="3"/>
+      <rect x="0" y="18" width="163" height="6" fill="url(#green)" rx="3"/>
+
+      <!-- sparkline -->
+      <rect x="0" y="32" width="428" height="36" fill="#1d2026" rx="3"/>
+      <path d="M 4 60 L 30 58 L 56 52 L 82 54 L 108 46 L 134 42 L 160 50 L 186 54
+               L 212 48 L 238 38 L 264 44 L 290 50 L 316 46 L 342 40 L 368 38 L 394 44 L 424 50"
+            stroke="url(#green)" stroke-width="1.6" fill="none"/>
+      <path d="M 4 60 L 30 58 L 56 52 L 82 54 L 108 46 L 134 42 L 160 50 L 186 54
+               L 212 48 L 238 38 L 264 44 L 290 50 L 316 46 L 342 40 L 368 38 L 394 44 L 424 50
+               L 424 68 L 4 68 Z"
+            fill="url(#green)" opacity="0.16"/>
+
+      <!-- per-core strip — 9 bars × 2 rows = 18 cores -->
+      <g transform="translate(0, 76)">
+        <!-- row 1: E-cores (lower) -->
+        <g>
+          <rect x="0"   y="0" width="44" height="6" rx="1.5" fill="#2c3038"/>
+          <rect x="48"  y="0" width="44" height="6" rx="1.5" fill="#2c3038"/>
+          <rect x="96"  y="0" width="44" height="6" rx="1.5" fill="#2c3038"/>
+          <rect x="144" y="0" width="44" height="6" rx="1.5" fill="#2c3038"/>
+          <rect x="192" y="0" width="44" height="6" rx="1.5" fill="#2c3038"/>
+          <rect x="240" y="0" width="44" height="6" rx="1.5" fill="#2c3038"/>
+          <rect x="288" y="0" width="44" height="6" rx="1.5" fill="#2c3038"/>
+          <rect x="336" y="0" width="44" height="6" rx="1.5" fill="#2c3038"/>
+          <rect x="384" y="0" width="44" height="6" rx="1.5" fill="#2c3038"/>
+          <rect x="0"   y="0" width="4"  height="6" rx="1.5" fill="url(#green)"/>
+          <rect x="48"  y="0" width="6"  height="6" rx="1.5" fill="url(#green)"/>
+          <rect x="96"  y="0" width="3"  height="6" rx="1.5" fill="url(#green)"/>
+          <rect x="144" y="0" width="2"  height="6" rx="1.5" fill="url(#green)"/>
+          <rect x="192" y="0" width="2"  height="6" rx="1.5" fill="url(#green)"/>
+          <rect x="240" y="0" width="3"  height="6" rx="1.5" fill="url(#green)"/>
+          <rect x="288" y="0" width="2"  height="6" rx="1.5" fill="url(#green)"/>
+          <rect x="336" y="0" width="3"  height="6" rx="1.5" fill="url(#green)"/>
+          <rect x="384" y="0" width="2"  height="6" rx="1.5" fill="url(#green)"/>
+        </g>
+        <!-- row 2: P-cores (higher, mixed) -->
+        <g transform="translate(0, 10)">
+          <rect x="0"   y="0" width="44" height="6" rx="1.5" fill="#2c3038"/>
+          <rect x="48"  y="0" width="44" height="6" rx="1.5" fill="#2c3038"/>
+          <rect x="96"  y="0" width="44" height="6" rx="1.5" fill="#2c3038"/>
+          <rect x="144" y="0" width="44" height="6" rx="1.5" fill="#2c3038"/>
+          <rect x="192" y="0" width="44" height="6" rx="1.5" fill="#2c3038"/>
+          <rect x="240" y="0" width="44" height="6" rx="1.5" fill="#2c3038"/>
+          <rect x="288" y="0" width="44" height="6" rx="1.5" fill="#2c3038"/>
+          <rect x="336" y="0" width="44" height="6" rx="1.5" fill="#2c3038"/>
+          <rect x="384" y="0" width="44" height="6" rx="1.5" fill="#2c3038"/>
+          <rect x="0"   y="0" width="32" height="6" rx="1.5" fill="url(#orange)"/>
+          <rect x="48"  y="0" width="28" height="6" rx="1.5" fill="url(#orange)"/>
+          <rect x="96"  y="0" width="22" height="6" rx="1.5" fill="url(#orange)"/>
+          <rect x="144" y="0" width="20" height="6" rx="1.5" fill="url(#green)"/>
+          <rect x="192" y="0" width="38" height="6" rx="1.5" fill="url(#orange)"/>
+          <rect x="240" y="0" width="34" height="6" rx="1.5" fill="url(#orange)"/>
+          <rect x="288" y="0" width="40" height="6" rx="1.5" fill="url(#red)"/>
+          <rect x="336" y="0" width="30" height="6" rx="1.5" fill="url(#orange)"/>
+          <rect x="384" y="0" width="36" height="6" rx="1.5" fill="url(#orange)"/>
+        </g>
+      </g>
+    </g>
+
+    <!-- divider -->
+    <line x1="16" y1="180" x2="444" y2="180" stroke="#2c3038" stroke-width="1"/>
+
+    <!-- MEM section -->
+    <g transform="translate(16, 190)">
+      <text x="0" y="10" font-size="10" font-weight="700" fill="#8b95a8"
+            letter-spacing="0.5">MEM</text>
+      <text x="428" y="10" text-anchor="end" font-size="12" font-weight="600"
+            fill="#e7e9ef" font-variant-numeric="tabular-nums">11.2 / 16 GB</text>
+      <rect x="0" y="18" width="428" height="6" fill="#2c3038" rx="3"/>
+      <rect x="0" y="18" width="299" height="6" fill="url(#orange)" rx="3"/>
+      <!-- flat mem trace -->
+      <rect x="0" y="32" width="428" height="20" fill="#1d2026" rx="3"/>
+      <path d="M 4 44 Q 100 42 200 44 T 424 43"
+            stroke="url(#orange)" stroke-width="1.4" fill="none"/>
+    </g>
+
+    <!-- divider -->
+    <line x1="16" y1="252" x2="444" y2="252" stroke="#2c3038" stroke-width="1"/>
+
+    <!-- process rows (faux) -->
+    <g transform="translate(16, 264)" font-size="10"
+       font-variant-numeric="tabular-nums">
+      <text x="0" y="10" fill="#8b95a8" font-weight="700" letter-spacing="0.5">PROCESSES</text>
+      <g fill="#c8cdd6" transform="translate(0, 26)">
+        <text x="0" y="0">Chrome Helper</text>
+        <text x="296" y="0" text-anchor="end" fill="#3ddb84">22.4%</text>
+        <text x="360" y="0" text-anchor="end">1.8 GB</text>
+        <text x="428" y="0" text-anchor="end" fill="#6b7384">1827</text>
+      </g>
+      <g fill="#c8cdd6" transform="translate(0, 42)">
+        <text x="0" y="0">WindowServer</text>
+        <text x="296" y="0" text-anchor="end" fill="#a8b0bd">9.1%</text>
+        <text x="360" y="0" text-anchor="end">412 MB</text>
+        <text x="428" y="0" text-anchor="end" fill="#6b7384">143</text>
+      </g>
+      <g fill="#c8cdd6" transform="translate(0, 58)">
+        <text x="0" y="0">sys-monitor</text>
+        <text x="296" y="0" text-anchor="end" fill="#a8b0bd">0.1%</text>
+        <text x="360" y="0" text-anchor="end">63 MB</text>
+        <text x="428" y="0" text-anchor="end" fill="#6b7384">7421</text>
+      </g>
+    </g>
+  </g>
+</svg>

@@ -1,0 +1,30 @@
+╔==================================================================╗
+║  +--⊕ sys-monitor ⊕--+                                           ║
+║  |  htop-inspired macOS menu-bar system monitor|                 ║
+║  +-------------------+                                           ║
+╠==============◆◆====================================◆◆============╣
+║                                                                  ║
+║  ◆ METRICS ----------------------------------------------------  ║
+║  ├- CPU  ·  overall + per-core (P/E asymmetry visible)           ║
+║  ├- MEM  ·  used + swap + pressure                               ║
+║  ├- PROCS  ·  top by CPU or memory                               ║
+║  └- NET + DISK  ·  system-wide throughput                        ║
+║                                                                  ║
+║  ◇ TIERS ------------------------------------------------------  ║
+║  ├- idle  · 2s · CPU + MEM only            (panel closed)        ║
+║  └- open  · 1s · + per-core + procs + I/O  (panel visible)       ║
+║                                                                  ║
+║  ▶ BUDGET -----------------------------------------------------  ║
+║  ├- idle CPU . . . . . . . . . . . . . < 1% of one core          ║
+║  ├- RSS  . . . . . . . . . . . . . . .  63 MB / 80 MB cap        ║
+║  └- leak Δ / 5 min  . . . . . . . . . . . . . . .  +1 MB         ║
+║                                                                  ║
+║  ▲ ARCHITECTURE -----------------------------------------------  ║
+║  ├- NSStatusItem + NSImage glyph  (live bar + tabular %)         ║
+║  ├- NSPanel + SwiftUI panel  (htop-density dropdown)             ║
+║  ├- Serial-queue sampler + Sendable snapshot publish             ║
+║  └- Rate math vs measured Δt (mach_absolute_time)                ║
+║                                                                  ║
+╠==============◆◆====================================◆◆============╣
+║  ⊙ Swift 5.9  ·  macOS 13+  ·  ./build.sh release                ║
+╚==================================================================╝

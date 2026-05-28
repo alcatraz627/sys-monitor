@@ -1,0 +1,23 @@
+#!/bin/bash
+# Lightweight conventional-commits gate. Accepts:
+#   feat: …    fix: …    docs: …    refactor: …    test: …    chore: …    perf: …    build: …    ci: …
+# Plus optional scope: feat(panel): …
+# Skip on merge commits.
+set -e
+
+msg_file="$1"
+first_line=$(head -n1 "$msg_file")
+
+# Allow merge / revert / fixup commits to pass through.
+case "$first_line" in
+    Merge\ *|Revert\ *|fixup!\ *|squash!\ *) exit 0 ;;
+esac
+
+pattern='^(feat|fix|docs|refactor|test|chore|perf|build|ci|style)(\([a-z0-9_-]+\))?: .+'
+if ! echo "$first_line" | grep -Eq "$pattern"; then
+    echo "✗ Commit message must follow conventional-commits format:" >&2
+    echo "    <type>[(scope)]: <subject>" >&2
+    echo "  Types: feat fix docs refactor test chore perf build ci style" >&2
+    echo "  Got:    $first_line" >&2
+    exit 1
+fi

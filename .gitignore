@@ -1,0 +1,31 @@
+# SwiftPM
+.build/
+.swiftpm/
+Package.pins
+*.xcodeproj/
+*.xcworkspace/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+
+# Built .app bundles (build.sh assembles them; not tracked)
+*.app/
+
+# macOS
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+
+# Claude Code agent artifacts
+.claude/output/
+.claude/wal.*
+.claude/skills/shared/locks/
+.claude/session-notes/
+_*.claude.md
+**/.playwright-mcp/
+
+# Scratch / personal
+*.local
+.env
