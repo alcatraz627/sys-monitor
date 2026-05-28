@@ -12,15 +12,29 @@ import Combine
 @MainActor
 public final class SettingsStore: ObservableObject {
 
-    public enum BarStyle: String, CaseIterable, Sendable {
-        case cpuPercent
-        case memoryPercent
+    /// Which resource cells appear in the menu-bar glyph, left to right
+    /// in the order CPU > MEM > NET > DISK. At least one must be on; the
+    /// settings UI enforces this by refusing to uncheck the last enabled
+    /// cell. Persisted as the raw OptionSet integer.
+    public struct BarCells: OptionSet, Sendable, Codable, Hashable {
+        public let rawValue: Int
+        public init(rawValue: Int) { self.rawValue = rawValue }
 
-        public var displayName: String {
-            switch self {
-            case .cpuPercent:    return "CPU %"
-            case .memoryPercent: return "Memory %"
-            }
+        public static let cpu  = BarCells(rawValue: 1 << 0)
+        public static let mem  = BarCells(rawValue: 1 << 1)
+        public static let net  = BarCells(rawValue: 1 << 2)
+        public static let disk = BarCells(rawValue: 1 << 3)
+
+        public static let defaultCells: BarCells = [.cpu, .mem]
+
+        /// Ordered cell list, left-to-right in the bar.
+        public var ordered: [BarCell] {
+            var out: [BarCell] = []
+            if contains(.cpu)  { out.append(.cpu) }
+            if contains(.mem)  { out.append(.mem) }
+            if contains(.net)  { out.append(.net) }
+            if contains(.disk) { out.append(.disk) }
+            return out
         }
     }
 
@@ -40,7 +54,7 @@ public final class SettingsStore: ObservableObject {
     private let defaults: UserDefaults
     private static let kIdle  = "idleCadenceSeconds"
     private static let kOpen  = "openCadenceSeconds"
-    private static let kStyle = "barStyle"
+    private static let kCells = "barCells"
     private static let kCount = "processCount"
     private static let kSort  = "defaultSort"
     private static let kLogin = "launchAtLogin"
@@ -57,8 +71,8 @@ public final class SettingsStore: ObservableObject {
             enforceOrdering()
         }
     }
-    @Published public var barStyle: BarStyle {
-        didSet { defaults.set(barStyle.rawValue, forKey: Self.kStyle) }
+    @Published public var barCells: BarCells {
+        didSet { defaults.set(barCells.rawValue, forKey: Self.kCells) }
     }
     @Published public var processCount: Int {
         didSet { defaults.set(processCount, forKey: Self.kCount) }
@@ -83,8 +97,14 @@ public final class SettingsStore: ObservableObject {
         // Load with sensible defaults if first run.
         self.idleCadenceSeconds = defaults.object(forKey: Self.kIdle) as? Double ?? 2.0
         self.openCadenceSeconds = defaults.object(forKey: Self.kOpen) as? Double ?? 1.0
-        self.barStyle = BarStyle(rawValue: defaults.string(forKey: Self.kStyle) ?? "")
-            ?? .cpuPercent
+        // Load barCells from the persisted Int rawValue. Absent → default
+        // [.cpu, .mem]. Empty stored value is impossible because the UI
+        // refuses to write one (last cell can't be unchecked).
+        if let raw = defaults.object(forKey: Self.kCells) as? Int, raw != 0 {
+            self.barCells = BarCells(rawValue: raw)
+        } else {
+            self.barCells = .defaultCells
+        }
         self.processCount = (defaults.object(forKey: Self.kCount) as? Int) ?? 10
         self.defaultSort = ProcSort(rawValue: defaults.string(forKey: Self.kSort) ?? "")
             ?? .cpu

@@ -43,6 +43,13 @@ public final class SamplingCoordinator: @unchecked Sendable {
     private var openCadenceSeconds: Double
     private let gapMultiplier: Double = 2.0
 
+    /// Whether the idle tier should also sample NET / DISK. Wired up to
+    /// "is this metric in the bar?" so we don't pay for samplers nothing
+    /// is rendering. Process enumeration is NEVER promoted to idle tier
+    /// regardless — too expensive.
+    private var idleSamplesNet: Bool = false
+    private var idleSamplesDisk: Bool = false
+
     // Rate-metric prev state. Each one is "the last raw reading we saw,"
     // or nil if we haven't taken a baseline yet (or just dropped one due
     // to a gap or a tier switch into a tier where this metric exists).
@@ -127,6 +134,20 @@ public final class SamplingCoordinator: @unchecked Sendable {
         }
     }
 
+    /// Tell the coordinator which idle-tier samplers to run. Mirror of
+    /// "is NET / DISK shown in the bar?" — turning a sampler off drops
+    /// its prev baseline so the next time it's needed it re-baselines
+    /// rather than computing across an arbitrary stale gap.
+    public func configureIdleSamplers(net: Bool, disk: Bool) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.idleSamplesNet = net
+            self.idleSamplesDisk = disk
+            if !net  { self.prevNet  = nil }
+            if !disk { self.prevDisk = nil }
+        }
+    }
+
     /// Stop everything cleanly. Called from `applicationWillTerminate`.
     public func shutdown() {
         queue.async { [weak self] in
@@ -204,22 +225,30 @@ public final class SamplingCoordinator: @unchecked Sendable {
 
     // MARK: - Ticks
 
-    /// Idle tier: overall CPU + memory only. Two cheap aggregate calls.
+    /// Idle tier: overall CPU + memory always; NET / DISK only if a
+    /// corresponding bar cell asked for them. Process enumeration is
+    /// never in idle tier.
     private func idleTick() {
         let now = monoSeconds()
         let elapsed = (prevTickTime > 0) ? (now - prevTickTime) : 0
         let isGap = (elapsed <= 0) || (elapsed > idleCadenceSeconds * gapMultiplier)
 
-        let cpuMetric = readOverallCPU(now: now, isGap: isGap)
-        let memMetric = readMemory(now: now)
+        let cpuMetric  = readOverallCPU(now: now, isGap: isGap)
+        let memMetric  = readMemory(now: now)
+        let netMetric: Metric<Throughput> = idleSamplesNet
+            ? readNet(now: now, elapsed: elapsed, isGap: isGap)
+            : .measuring
+        let diskMetric: Metric<Throughput> = idleSamplesDisk
+            ? readDisk(now: now, elapsed: elapsed, isGap: isGap)
+            : .measuring
 
         prevTickTime = now
         publishSnapshot(
             cpu: cpuMetric,
             memory: memMetric,
             processes: .measuring,
-            net: .measuring,
-            disk: .measuring
+            net: netMetric,
+            disk: diskMetric
         )
     }
 

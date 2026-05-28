@@ -40,11 +40,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let statusItemController = StatusItemController(
             store: store,
-            style: GlyphRenderer.Style(settings.barStyle)
+            cells: settings.barCells.ordered
         ) { [weak panelController] in
             panelController?.toggle()
         }
         panelController.bind(statusItem: statusItemController.statusItem)
+
+        // Idle-tier samplers track the bar cells: if NET / DISK is shown
+        // there, we need samples to compute its rate while the panel's
+        // closed.
+        coordinator.configureIdleSamplers(
+            net:  settings.barCells.contains(.net),
+            disk: settings.barCells.contains(.disk)
+        )
 
         self.settings = settings
         self.store = store
@@ -64,9 +72,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .sink { [weak coordinator] s in coordinator?.updateOpenCadenceSeconds(s) }
             .store(in: &cancellables)
 
-        settings.$barStyle.dropFirst()
-            .sink { [weak statusItemController] s in
-                statusItemController?.updateStyle(GlyphRenderer.Style(s))
+        settings.$barCells.dropFirst()
+            .sink { [weak statusItemController, weak coordinator] cells in
+                statusItemController?.updateCells(cells.ordered)
+                coordinator?.configureIdleSamplers(
+                    net:  cells.contains(.net),
+                    disk: cells.contains(.disk)
+                )
             }
             .store(in: &cancellables)
 
@@ -127,14 +139,3 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-// Bridge between the persisted Settings enum and the renderer's enum.
-// Kept here rather than inside GlyphRenderer to avoid the shell depending
-// on the Settings type — the bridge is a one-line conversion.
-private extension GlyphRenderer.Style {
-    init(_ s: SettingsStore.BarStyle) {
-        switch s {
-        case .cpuPercent:    self = .cpuPercent
-        case .memoryPercent: self = .memoryPercent
-        }
-    }
-}

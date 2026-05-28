@@ -17,11 +17,11 @@ final class StatusItemController {
 
     init(
         store: MetricsStore,
-        style: GlyphRenderer.Style = .cpuPercent,
+        cells: [BarCell] = [.cpu, .mem],
         onClick: @escaping () -> Void
     ) {
         self.store = store
-        self.renderer = GlyphRenderer(style: style)
+        self.renderer = GlyphRenderer(cells: cells)
         self.statusItem = NSStatusBar.system.statusItem(
             withLength: NSStatusItem.variableLength
         )
@@ -45,11 +45,11 @@ final class StatusItemController {
         }
     }
 
-    /// Swap the bar glyph style at runtime (settings change). Rebuilds the
-    /// renderer with new reserved-width and color rules, then redraws
-    /// against the current snapshot so the new look appears immediately.
-    func updateStyle(_ style: GlyphRenderer.Style) {
-        renderer = GlyphRenderer(style: style)
+    /// Swap the bar-cell layout at runtime (settings change). Rebuilds
+    /// the renderer with new reserved-width and per-cell rules, then
+    /// redraws against the current snapshot.
+    func updateCells(_ cells: [BarCell]) {
+        renderer = GlyphRenderer(cells: cells)
         redraw(snapshot: store.snapshot)
     }
 

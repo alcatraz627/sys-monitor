@@ -33,13 +33,20 @@ struct SettingsView: View {
                 }
             }
 
-            Section("Menu bar glyph") {
-                Picker("Show", selection: $settings.barStyle) {
-                    ForEach(SettingsStore.BarStyle.allCases, id: \.self) { s in
-                        Text(s.displayName).tag(s)
-                    }
+            Section("Menu bar") {
+                Text("Pick one or more metrics. They render left-to-right in the order CPU > MEM > NET > DISK.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Toggle("CPU",       isOn: cellBinding(.cpu))
+                Toggle("Memory",    isOn: cellBinding(.mem))
+                Toggle("Network",   isOn: cellBinding(.net))
+                Toggle("Disk I/O",  isOn: cellBinding(.disk))
+                if settings.barCells.ordered.count == 1 {
+                    Label("At least one metric must remain enabled",
+                          systemImage: "info.circle")
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
                 }
-                .pickerStyle(.segmented)
             }
 
             Section("Process list") {
@@ -85,5 +92,20 @@ struct SettingsView: View {
     private func formatSeconds(_ v: Double) -> String {
         if v == floor(v) { return "\(Int(v)) s" }
         return String(format: "%.1f s", v)
+    }
+
+    /// Toggle for a single bar cell. The setter refuses to remove the
+    /// last enabled cell — the menu-bar glyph must always show something.
+    private func cellBinding(_ cell: SettingsStore.BarCells) -> Binding<Bool> {
+        Binding(
+            get: { settings.barCells.contains(cell) },
+            set: { wanted in
+                if wanted {
+                    settings.barCells.insert(cell)
+                } else if settings.barCells.ordered.count > 1 {
+                    settings.barCells.remove(cell)
+                }
+            }
+        )
     }
 }
