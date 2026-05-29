@@ -1,93 +1,110 @@
 import AppKit
 
-/// One unit of the menu-bar glyph. CPU + MEM render as a mini bar plus a
-/// right-aligned percentage. NET + DISK render as two icon+value pairs
-/// (down then up). Cells are drawn left to right with a hairline separator
-/// between them — there is no container pill, by design.
+/// One unit of the menu-bar glyph. Each cell leads with an identity SF
+/// Symbol, then a numeric readout. CPU and MEM render the glyph itself as
+/// a fill gauge (clipped from the bottom by load fraction). NET and DISK
+/// show one combined throughput value with a small direction triangle.
 public enum BarCell: Sendable, Hashable {
     case cpu, mem, net, disk
 }
 
 /// Renders one or more `BarCell` values into a single `NSImage` for the
-/// status-item button. The image has a fixed total width — each cell and
-/// every numeric sub-box reserves room for its worst-case content so
-/// nothing horizontally jitters as digits change order of magnitude.
+/// status-item button. The widget's grammar matches native menu-bar items:
+/// each cell is `[icon][value]`, color used only for severity (yellow on
+/// warn, red on critical), monochrome at rest.
 public struct GlyphRenderer {
 
     public let cells: [BarCell]
-    private let font: NSFont
-    private let cellWidths: [CGFloat]
+    private let cellLayouts: [CellLayout]
     private let totalWidth: CGFloat
 
-    private let height: CGFloat = 18
-    private let gap: CGFloat = 6
-    private let leftPad: CGFloat = 9
-    private let rightPad: CGFloat = 9
-    private let separatorAlpha: CGFloat = 0.32
-    private let separatorHeight: CGFloat = 11
+    // Cell-shape constants
+    private static let primaryGlyphPt:   CGFloat = 13
+    private static let secondaryGlyphPt: CGFloat = 12
+    private static let primaryNumPt:     CGFloat = 12
+    private static let secondaryNumPt:   CGFloat = 11
+    private static let unitPt:           CGFloat = 8
+    private static let trianglePt:       CGFloat = 7
+    private static let height:           CGFloat = 18
+    private static let glyphTextGap:     CGFloat = 3
+    private static let interCellGap:     CGFloat = 8
+    private static let pairSepLeftGap:   CGFloat = 4
+    private static let pairSepRightGap:  CGFloat = 5
+    private static let separatorWidth:   CGFloat = 1
+    private static let separatorHeight:  CGFloat = 12
+    private static let leftPad:          CGFloat = 9
+    private static let rightPad:         CGFloat = 9
+    // Reserved value widths so the overall widget doesn't shift even
+    // though individual numbers may.
+    private static let cpuMemNumberBoxW: CGFloat = 30   // "100%"
+    private static let throughputNumW:   CGFloat = 26   // "999K" + small triangle
 
-    // Per-cell layout constants
-    private let barWidth: CGFloat = 16
-    private let barTextGap: CGFloat = 4
-    private let numericBoxWidth: CGFloat = 30   // fits "999K" / "1.2M" comfortably
-    private let symbolBoxWidth: CGFloat = 10
-    private let symbolNumGap: CGFloat = 2
-    private let throughputPairGap: CGFloat = 6  // between the "down" pair and the "up" pair
+    private struct CellLayout {
+        let cell: BarCell
+        let width: CGFloat
+        let isPrimary: Bool
+    }
 
     public init(cells: [BarCell] = [.cpu, .mem]) {
         let effectiveCells = cells.isEmpty ? [.cpu] : cells
         self.cells = effectiveCells
-        // Regular weight to sit alongside the system clock / battery rather
-        // than against them — medium read as slightly bolded next to native.
-        let f = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
-        self.font = f
-        var widths: [CGFloat] = []
+        var layouts: [CellLayout] = []
         for cell in effectiveCells {
             switch cell {
             case .cpu, .mem:
-                widths.append(16 + 4 + 28)  // bar + gap + "100%" text box
+                layouts.append(.init(
+                    cell: cell,
+                    width: Self.primaryGlyphPt + Self.glyphTextGap + Self.cpuMemNumberBoxW,
+                    isPrimary: true
+                ))
             case .net, .disk:
-                // [9 icon][2 gap][22 left-aligned value] x 2, separated by
-                // a 5pt pair gap. Left alignment keeps the icon visually
-                // adjacent to its number; the cell is still fixed-width so
-                // the widget itself doesn't shift as values change.
-                widths.append(
-                    9 + 2 + 22 + 5 + 9 + 2 + 22
-                )
+                layouts.append(.init(
+                    cell: cell,
+                    width: Self.secondaryGlyphPt + Self.glyphTextGap + Self.throughputNumW,
+                    isPrimary: false
+                ))
             }
         }
-        self.cellWidths = widths
-        let cellsTotal = widths.reduce(0, +)
-        let gapsTotal = CGFloat(max(0, effectiveCells.count - 1)) * 6
-        self.totalWidth = 9 + cellsTotal + gapsTotal + 9
+        self.cellLayouts = layouts
+
+        // Total width = padding + cells + gaps. Gaps are intra-pair (8pt)
+        // or pair-separator (4 + 1 + 5 = 10pt) where adjacency crosses the
+        // compute/IO boundary.
+        var w: CGFloat = Self.leftPad
+        for (i, layout) in layouts.enumerated() {
+            w += layout.width
+            if i < layouts.count - 1 {
+                let next = layouts[i + 1]
+                if Self.isPairBoundary(from: layout.cell, to: next.cell) {
+                    w += Self.pairSepLeftGap + Self.separatorWidth + Self.pairSepRightGap
+                } else {
+                    w += Self.interCellGap
+                }
+            }
+        }
+        w += Self.rightPad
+        self.totalWidth = w
     }
 
     public func render(snapshot: MetricsSnapshot) -> NSImage {
-        let size = NSSize(width: totalWidth, height: height)
-        let cells = self.cells
-        let cellWidths = self.cellWidths
-        let height = self.height
-        let gap = self.gap
-        let leftPad = self.leftPad
-        let separatorHeight = self.separatorHeight
-        let separatorAlpha = self.separatorAlpha
-        let font = self.font
+        let size = NSSize(width: totalWidth, height: Self.height)
+        let layouts = self.cellLayouts
 
         let image = NSImage(size: size, flipped: false) { _ in
-            var x: CGFloat = leftPad
-            for (i, cell) in cells.enumerated() {
-                let w = cellWidths[i]
-                let cellRect = NSRect(x: x, y: 0, width: w, height: height)
-                Self.drawCell(cell, in: cellRect, snapshot: snapshot, font: font)
-                x += w
-                if i < cells.count - 1 {
-                    // Hairline separator centered in the inter-cell gap.
-                    let sepX = x + gap / 2 - 0.5
-                    let sepY = (height - separatorHeight) / 2
-                    let sep = NSRect(x: sepX, y: sepY, width: 1, height: separatorHeight)
-                    NSColor.labelColor.withAlphaComponent(separatorAlpha).setFill()
-                    sep.fill()
-                    x += gap
+            var x: CGFloat = Self.leftPad
+            for (i, layout) in layouts.enumerated() {
+                let cellRect = NSRect(x: x, y: 0, width: layout.width, height: Self.height)
+                Self.drawCell(layout.cell, in: cellRect, snapshot: snapshot)
+                x += layout.width
+                if i < layouts.count - 1 {
+                    let next = layouts[i + 1]
+                    if Self.isPairBoundary(from: layout.cell, to: next.cell) {
+                        x += Self.pairSepLeftGap
+                        Self.drawSeparator(atX: x)
+                        x += Self.separatorWidth + Self.pairSepRightGap
+                    } else {
+                        x += Self.interCellGap
+                    }
                 }
             }
             return true
@@ -101,149 +118,328 @@ public struct GlyphRenderer {
              .joined(separator: ", ")
     }
 
-    // MARK: - Per-cell drawing
+    // MARK: - Layout helpers
 
-    private static func drawCell(
-        _ cell: BarCell, in rect: NSRect, snapshot: MetricsSnapshot, font: NSFont
-    ) {
+    /// The compute pair (CPU, MEM) and the I/O pair (NET, DISK) are visually
+    /// separated by a hairline. Any time we cross that boundary going
+    /// left-to-right, drop in a separator.
+    private static func isPairBoundary(from a: BarCell, to b: BarCell) -> Bool {
+        let computeSet: Set<BarCell> = [.cpu, .mem]
+        let ioSet: Set<BarCell>      = [.net, .disk]
+        return (computeSet.contains(a) && ioSet.contains(b))
+            || (ioSet.contains(a) && computeSet.contains(b))
+    }
+
+    private static func drawSeparator(atX x: CGFloat) {
+        // 1pt rect at tertiary alpha — quaternary disappeared on dark menu
+        // bars and read as nothing; tertiary registers as a hairline.
+        let y = (height - separatorHeight) / 2
+        let rect = NSRect(x: x, y: y, width: separatorWidth, height: separatorHeight)
+        NSColor.tertiaryLabelColor.setFill()
+        rect.fill()
+    }
+
+    // MARK: - Cell dispatch
+
+    private static func drawCell(_ cell: BarCell, in rect: NSRect, snapshot: MetricsSnapshot) {
         switch cell {
         case .cpu:
-            drawLoadCell(
-                load: cpuLoad(snapshot), text: cpuText(snapshot),
-                color: cpuLoadColor(cpuLoad(snapshot)),
-                in: rect, font: font
+            drawComputeCell(
+                symbol: "cpu",
+                load: cpuLoad(snapshot),
+                text: cpuPercentText(snapshot),
+                severity: severity(load: cpuLoad(snapshot), warn: 0.60, critical: 0.85),
+                isMeasuring: !cpuOK(snapshot),
+                in: rect
             )
         case .mem:
-            drawLoadCell(
-                load: memLoad(snapshot), text: memText(snapshot),
-                color: memLoadColor(memLoad(snapshot)),
-                in: rect, font: font
+            drawComputeCell(
+                symbol: "memorychip",
+                load: memLoad(snapshot),
+                text: memPercentText(snapshot),
+                severity: severity(load: memLoad(snapshot), warn: 0.75, critical: 0.92),
+                isMeasuring: !memOK(snapshot),
+                in: rect
             )
         case .net:
             drawThroughputCell(
-                downSymbol: "arrow.down",
-                upSymbol:   "arrow.up",
-                downBps:    netDownBps(snapshot),
-                upBps:      netUpBps(snapshot),
-                downText:   netDownText(snapshot),
-                upText:     netUpText(snapshot),
-                in: rect, font: font
+                symbol: "arrow.up.arrow.down",
+                metric: snapshot.net,
+                in: rect
             )
         case .disk:
-            // Bare arrows match NET so the two throughput cells have
-            // identical visual weight. The separator + cell order
-            // (NET first, DISK second) is what distinguishes them.
             drawThroughputCell(
-                downSymbol: "arrow.down",
-                upSymbol:   "arrow.up",
-                downBps:    diskReadBps(snapshot),
-                upBps:      diskWriteBps(snapshot),
-                downText:   diskReadText(snapshot),
-                upText:     diskWriteText(snapshot),
-                in: rect, font: font
+                symbol: "internaldrive",
+                metric: snapshot.disk,
+                in: rect
             )
         }
     }
 
-    private static func drawLoadCell(
-        load: Double, text: String, color: NSColor, in rect: NSRect, font: NSFont
-    ) {
-        let barWidth: CGFloat = 16
-        let barRect = NSRect(
-            x: rect.minX, y: rect.minY + 3,
-            width: barWidth, height: rect.height - 6
-        )
-        NSColor.tertiaryLabelColor.withAlphaComponent(0.3).setFill()
-        NSBezierPath(roundedRect: barRect, xRadius: 2, yRadius: 2).fill()
+    // MARK: - CPU / MEM cell (glyph-as-gauge + number)
 
-        if load > 0 {
-            let filled = max(1, barRect.width * CGFloat(min(max(load, 0), 1)))
-            let fillRect = NSRect(
-                x: barRect.minX, y: barRect.minY,
-                width: filled, height: barRect.height
-            )
-            color.setFill()
-            NSBezierPath(roundedRect: fillRect, xRadius: 2, yRadius: 2).fill()
-        }
+    private static func drawComputeCell(
+        symbol: String, load: Double, text: String,
+        severity: Severity, isMeasuring: Bool,
+        in rect: NSRect
+    ) {
+        let glyphRect = NSRect(
+            x: rect.minX, y: 0,
+            width: primaryGlyphPt, height: rect.height
+        )
+        drawGaugeGlyph(
+            symbol: symbol, pointSize: primaryGlyphPt, weight: .medium,
+            load: isMeasuring ? 0 : load,
+            severity: severity,
+            in: glyphRect
+        )
 
         let textRect = NSRect(
-            x: rect.minX + barWidth + 4, y: 0,
-            width: rect.width - barWidth - 4, height: rect.height
+            x: rect.minX + primaryGlyphPt + glyphTextGap, y: 0,
+            width: rect.width - primaryGlyphPt - glyphTextGap,
+            height: rect.height
         )
-        drawText(text, in: textRect, font: font, color: NSColor.labelColor, alignment: .right)
+        drawPercent(text: text, severity: severity, in: textRect)
     }
 
-    private static func drawThroughputCell(
-        downSymbol: String, upSymbol: String,
-        downBps: Double, upBps: Double,
-        downText: String, upText: String,
-        in rect: NSRect, font: NSFont
+    /// Draws an SF Symbol with a load-fraction fill rising from the
+    /// bottom. The unfilled portion is `tertiaryLabelColor`; the filled
+    /// portion is `secondaryLabelColor` at normal load, `systemYellow` at
+    /// warn, `systemRed` at critical. The glyph IS the gauge.
+    private static func drawGaugeGlyph(
+        symbol: String, pointSize: CGFloat, weight: NSFont.Weight,
+        load: Double, severity: Severity,
+        in rect: NSRect
     ) {
-        let symW: CGFloat = 9
-        let numW: CGFloat = 22
-        let symNumGap: CGFloat = 2
-        let pairGap: CGFloat = 5
-
-        var x = rect.minX
-        // Each direction is [icon][value], read as a tight pair. Icons
-        // at secondaryLabelColor so they survive saturated wallpapers;
-        // values left-aligned so they sit immediately next to their icon
-        // rather than floating at the far end of a right-aligned column.
-        drawSymbol(downSymbol, in: NSRect(x: x, y: 0, width: symW, height: rect.height),
-                   color: .secondaryLabelColor)
-        x += symW + symNumGap
-        drawText(downText, in: NSRect(x: x, y: 0, width: numW, height: rect.height),
-                 font: font,
-                 color: throughputColor(forBps: downBps),
-                 alignment: .left)
-        x += numW + pairGap
-        drawSymbol(upSymbol, in: NSRect(x: x, y: 0, width: symW, height: rect.height),
-                   color: .secondaryLabelColor)
-        x += symW + symNumGap
-        drawText(upText, in: NSRect(x: x, y: 0, width: numW, height: rect.height),
-                 font: font,
-                 color: throughputColor(forBps: upBps),
-                 alignment: .left)
-    }
-
-    // MARK: - Drawing primitives
-
-    private static func drawText(
-        _ text: String, in rect: NSRect, font: NSFont,
-        color: NSColor, alignment: NSTextAlignment
-    ) {
-        let para = NSMutableParagraphStyle()
-        para.alignment = alignment
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: color,
-            .paragraphStyle: para,
-        ]
-        let textHeight = font.ascender + abs(font.descender)
-        let textY = (rect.height - textHeight) / 2
-        let drawRect = NSRect(x: rect.minX, y: textY, width: rect.width, height: textHeight)
-        (text as NSString).draw(in: drawRect, withAttributes: attrs)
-    }
-
-    /// Render an SF Symbol image with a fixed tint into the given rect,
-    /// vertically centered. The symbol is recreated per draw — fine at one
-    /// redraw per tick; cache later only if measurable. 9pt point size keeps
-    /// the icon visually lighter than the 11pt numbers it accompanies.
-    private static func drawSymbol(_ name: String, in rect: NSRect, color: NSColor) {
-        let config = NSImage.SymbolConfiguration(pointSize: 9, weight: .regular)
+        let config = NSImage.SymbolConfiguration(pointSize: pointSize, weight: weight)
         guard
-            let base = NSImage(systemSymbolName: name, accessibilityDescription: nil),
+            let base = NSImage(systemSymbolName: symbol, accessibilityDescription: nil),
             let configured = base.withSymbolConfiguration(config)
         else { return }
-        let tinted = configured.tinted(color)
-        let s = tinted.size
-        // Center the symbol inside its column.
+
+        let s = configured.size
         let drawRect = NSRect(
             x: rect.minX + (rect.width - s.width) / 2,
             y: (rect.height - s.height) / 2,
             width: s.width, height: s.height
         )
-        tinted.draw(in: drawRect)
+
+        // Background: dim "track" version of the glyph. Quaternary so
+        // the fill above it has real contrast on dark menu bars.
+        configured.tinted(.quaternaryLabelColor).draw(in: drawRect)
+
+        // Filled portion clipped to the bottom load-fraction. Fill uses
+        // full `labelColor` at normal load so the gauge is actually
+        // readable — secondary tint blends into the track and the gauge
+        // becomes invisible.
+        let frac = CGFloat(min(max(load, 0), 1))
+        guard frac > 0 else { return }
+        let fillColor: NSColor = {
+            switch severity {
+            case .normal:   return .labelColor
+            case .warn:     return .systemYellow
+            case .critical: return .systemRed
+            }
+        }()
+        let fillHeight = s.height * frac
+        let clipRect = NSRect(
+            x: drawRect.minX, y: drawRect.minY,
+            width: s.width, height: fillHeight
+        )
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(rect: clipRect).addClip()
+        configured.tinted(fillColor).draw(in: drawRect)
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    private static func drawPercent(text: String, severity: Severity, in rect: NSRect) {
+        // Split "26%" into digits + "%" so we can render the unit smaller.
+        let digits: String
+        let unit: String
+        if let pIdx = text.firstIndex(of: "%") {
+            digits = String(text[..<pIdx])
+            unit = "%"
+        } else {
+            digits = text
+            unit = ""
+        }
+        let numberFont = roundedFont(size: primaryNumPt, weight: severity == .critical ? .bold : .semibold)
+        let unitFont   = roundedFont(size: unitPt, weight: .medium)
+        let numberColor: NSColor = severity == .critical ? .systemRed : .labelColor
+        let unitColor:   NSColor = .tertiaryLabelColor
+
+        // Combine into one attributed string so layout is automatic.
+        let attr = NSMutableAttributedString()
+        attr.append(NSAttributedString(string: digits, attributes: [
+            .font: numberFont,
+            .foregroundColor: numberColor,
+        ]))
+        if !unit.isEmpty {
+            attr.append(NSAttributedString(string: unit, attributes: [
+                .font: unitFont,
+                .foregroundColor: unitColor,
+                .baselineOffset: 0.5,
+            ]))
+        }
+
+        let attrSize = attr.size()
+        let drawY = (rect.height - attrSize.height) / 2
+        let drawRect = NSRect(
+            x: rect.minX + (rect.width - attrSize.width),  // right-aligned in box
+            y: drawY,
+            width: attrSize.width, height: attrSize.height
+        )
+        attr.draw(in: drawRect)
+    }
+
+    // MARK: - NET / DISK cell (icon + combined value + direction triangle)
+
+    private static func drawThroughputCell(
+        symbol: String, metric: Metric<Throughput>, in rect: NSRect
+    ) {
+        let glyphRect = NSRect(
+            x: rect.minX, y: 0,
+            width: secondaryGlyphPt, height: rect.height
+        )
+        drawIconOnly(
+            symbol: symbol, pointSize: secondaryGlyphPt, weight: .regular,
+            color: .tertiaryLabelColor,
+            in: glyphRect
+        )
+
+        let textRect = NSRect(
+            x: rect.minX + secondaryGlyphPt + glyphTextGap, y: 0,
+            width: rect.width - secondaryGlyphPt - glyphTextGap,
+            height: rect.height
+        )
+        let (display, direction) = throughputDisplay(metric: metric)
+        drawThroughputValue(display: display, direction: direction, in: textRect)
+    }
+
+    private static func drawIconOnly(
+        symbol: String, pointSize: CGFloat, weight: NSFont.Weight,
+        color: NSColor, in rect: NSRect
+    ) {
+        let config = NSImage.SymbolConfiguration(pointSize: pointSize, weight: weight)
+        guard
+            let base = NSImage(systemSymbolName: symbol, accessibilityDescription: nil),
+            let configured = base.withSymbolConfiguration(config)
+        else { return }
+        let s = configured.size
+        let drawRect = NSRect(
+            x: rect.minX + (rect.width - s.width) / 2,
+            y: (rect.height - s.height) / 2,
+            width: s.width, height: s.height
+        )
+        configured.tinted(color).draw(in: drawRect)
+    }
+
+    fileprivate enum Direction {
+        case down, up, balanced, none
+
+        /// Unicode triangle: ▼ down-dominant, ▲ up-dominant, • balanced,
+        /// nil for idle (no triangle drawn).
+        var triangle: String? {
+            switch self {
+            case .down:     return "▼"
+            case .up:       return "▲"
+            case .balanced: return "•"
+            case .none:     return nil
+            }
+        }
+
+        var spokenLabel: String {
+            switch self {
+            case .down:     return "downloading"
+            case .up:       return "uploading"
+            case .balanced: return "balanced"
+            case .none:     return "idle"
+            }
+        }
+    }
+
+    private static func throughputDisplay(metric: Metric<Throughput>) -> (display: String, direction: Direction) {
+        switch metric {
+        case .measuring, .unavailable:
+            return ("—", .none)
+        case .ok(let t):
+            let down = max(0, t.inPerSec)
+            let up   = max(0, t.outPerSec)
+            let total = down + up
+            // Idle: anything under 1 KB/s combined reads as quiet. The
+            // em-dash + neutral color is the native "nothing here" signal.
+            if total < 1024 {
+                return ("—", .none)
+            }
+            let dir: Direction
+            if down > up * 1.6      { dir = .down }
+            else if up > down * 1.6 { dir = .up }
+            else                    { dir = .balanced }
+            return (compactBytes(total), dir)
+        }
+    }
+
+    private static func drawThroughputValue(display: String, direction: Direction, in rect: NSRect) {
+        // Split "999K" into "999" + "K" so the unit can render smaller.
+        let digits: String
+        let unit: String
+        if let unitIdx = display.firstIndex(where: { "BKMG".contains($0) }) {
+            digits = String(display[..<unitIdx])
+            unit = String(display[unitIdx])
+        } else if display == "—" {
+            digits = "—"
+            unit = ""
+        } else {
+            digits = display
+            unit = ""
+        }
+
+        let numberFont = roundedFont(size: secondaryNumPt, weight: .regular)
+        let unitFont   = roundedFont(size: unitPt, weight: .regular)
+        // Triangle bumped to medium weight; at 7pt regular it reads as a
+        // decorative diamond rather than a direction indicator.
+        let dirFont    = roundedFont(size: trianglePt, weight: .semibold)
+
+        let attr = NSMutableAttributedString()
+        attr.append(NSAttributedString(string: digits, attributes: [
+            .font: numberFont,
+            .foregroundColor: display == "—" ? NSColor.tertiaryLabelColor : NSColor.labelColor,
+        ]))
+        if !unit.isEmpty {
+            attr.append(NSAttributedString(string: unit, attributes: [
+                .font: unitFont,
+                .foregroundColor: NSColor.tertiaryLabelColor,
+                .baselineOffset: 0.5,
+            ]))
+        }
+        if let triangle = direction.triangle {
+            // 1pt kern instead of a full space — keeps the triangle tight
+            // to the value it modifies.
+            attr.append(NSAttributedString(string: triangle, attributes: [
+                .font: dirFont,
+                .foregroundColor: NSColor.secondaryLabelColor,
+                .baselineOffset: 1.5,
+                .kern: 1,
+            ]))
+        }
+
+        let attrSize = attr.size()
+        let drawY = (rect.height - attrSize.height) / 2
+        let drawRect = NSRect(
+            x: rect.minX + (rect.width - attrSize.width),  // right-aligned in cell
+            y: drawY,
+            width: attrSize.width, height: attrSize.height
+        )
+        attr.draw(in: drawRect)
+    }
+
+    // MARK: - Severity
+
+    private enum Severity { case normal, warn, critical }
+    private static func severity(load: Double, warn: Double, critical: Double) -> Severity {
+        if load >= critical { return .critical }
+        if load >= warn     { return .warn }
+        return .normal
     }
 
     // MARK: - Snapshot → display values
@@ -252,7 +448,10 @@ public struct GlyphRenderer {
         if case .ok(let v) = s.cpu { return v.overall }
         return 0
     }
-    private static func cpuText(_ s: MetricsSnapshot) -> String {
+    private static func cpuOK(_ s: MetricsSnapshot) -> Bool {
+        if case .ok = s.cpu { return true }; return false
+    }
+    private static func cpuPercentText(_ s: MetricsSnapshot) -> String {
         switch s.cpu {
         case .ok(let v):              return "\(Int((v.overall * 100).rounded()))%"
         case .measuring, .unavailable: return "—"
@@ -264,7 +463,11 @@ public struct GlyphRenderer {
         }
         return 0
     }
-    private static func memText(_ s: MetricsSnapshot) -> String {
+    private static func memOK(_ s: MetricsSnapshot) -> Bool {
+        if case .ok(let v) = s.memory, v.totalBytes > 0 { return true }
+        return false
+    }
+    private static func memPercentText(_ s: MetricsSnapshot) -> String {
         switch s.memory {
         case .ok(let v) where v.totalBytes > 0:
             let frac = Double(v.usedBytes) / Double(v.totalBytes)
@@ -273,85 +476,38 @@ public struct GlyphRenderer {
         }
     }
 
-    private static func netDownBps(_ s: MetricsSnapshot) -> Double {
-        if case .ok(let t) = s.net { return t.inPerSec }
-        return -1
-    }
-    private static func netUpBps(_ s: MetricsSnapshot) -> Double {
-        if case .ok(let t) = s.net { return t.outPerSec }
-        return -1
-    }
-    private static func netDownText(_ s: MetricsSnapshot) -> String {
-        if case .ok(let t) = s.net { return compactBytes(t.inPerSec) }
-        return "—"
-    }
-    private static func netUpText(_ s: MetricsSnapshot) -> String {
-        if case .ok(let t) = s.net { return compactBytes(t.outPerSec) }
-        return "—"
-    }
-    private static func diskReadBps(_ s: MetricsSnapshot) -> Double {
-        if case .ok(let t) = s.disk { return t.inPerSec }
-        return -1
-    }
-    private static func diskWriteBps(_ s: MetricsSnapshot) -> Double {
-        if case .ok(let t) = s.disk { return t.outPerSec }
-        return -1
-    }
-    private static func diskReadText(_ s: MetricsSnapshot) -> String {
-        if case .ok(let t) = s.disk { return compactBytes(t.inPerSec) }
-        return "—"
-    }
-    private static func diskWriteText(_ s: MetricsSnapshot) -> String {
-        if case .ok(let t) = s.disk { return compactBytes(t.outPerSec) }
-        return "—"
-    }
-
-    /// Very compact bytes-per-second formatter. Reserves enough characters
-    /// for "999M" worst case so right-aligned values lock in their column.
+    /// Compact bytes/sec formatter. We round aggressively (no decimal) for
+    /// menu-bar density — the panel shows precise values for users who care.
     private static func compactBytes(_ v: Double) -> String {
-        if v < 0 { return "—" }
         if v >= 1_048_576 { return "\(Int((v / 1_048_576).rounded()))M" }
         if v >= 1_024     { return "\(Int((v / 1_024).rounded()))K" }
         return "\(Int(v))B"
     }
 
-    /// Idle-dim a throughput number when it's truly quiet. `secondary`
-    /// (not tertiary) so a dim value reads as "low activity" rather than
-    /// "broken" against saturated wallpapers. Threshold raised to 150 KB/s
-    /// — modern machines breathe at ~35 KB/s on idle, and the old 50 KB/s
-    /// fired the dim too eagerly.
-    private static func throughputColor(forBps bps: Double) -> NSColor {
-        if bps < 0            { return .secondaryLabelColor }   // .measuring / .unavailable
-        if bps < 150 * 1_024  { return .secondaryLabelColor }
-        return .labelColor
-    }
+    // MARK: - Fonts
 
-    /// CPU load ramp: calm < 60% < elevated < 85% < hot.
-    private static func cpuLoadColor(_ load: Double) -> NSColor {
-        switch load {
-        case ..<0.60: return .systemGreen
-        case ..<0.85: return .systemOrange
-        default:      return .systemRed
+    /// SF Pro Rounded at the requested size + weight. Falls back to the
+    /// default system font if rounded isn't available on the host (it
+    /// always is on macOS 11+, but defensive).
+    private static func roundedFont(size: CGFloat, weight: NSFont.Weight) -> NSFont {
+        let base = NSFont.systemFont(ofSize: size, weight: weight)
+        if let descriptor = base.fontDescriptor.withDesign(.rounded),
+           let rounded = NSFont(descriptor: descriptor, size: size) {
+            return rounded
         }
-    }
-
-    /// Memory load ramp: thresholds raised because compressed memory +
-    /// cache on a healthy macOS routinely sit at 60-70% even on idle
-    /// machines. 75 / 92 reads as "actually elevated" / "actually hot."
-    private static func memLoadColor(_ load: Double) -> NSColor {
-        switch load {
-        case ..<0.75: return .systemGreen
-        case ..<0.92: return .systemOrange
-        default:      return .systemRed
-        }
+        return base
     }
 
     private static func accessibilityFor(cell: BarCell, snapshot: MetricsSnapshot) -> String {
         switch cell {
-        case .cpu:  return "CPU \(cpuText(snapshot))"
-        case .mem:  return "Memory \(memText(snapshot))"
-        case .net:  return "Network down \(netDownText(snapshot)), up \(netUpText(snapshot))"
-        case .disk: return "Disk read \(diskReadText(snapshot)), write \(diskWriteText(snapshot))"
+        case .cpu:  return "CPU \(cpuPercentText(snapshot))"
+        case .mem:  return "Memory \(memPercentText(snapshot))"
+        case .net:
+            let (d, dir) = throughputDisplay(metric: snapshot.net)
+            return "Network \(d) \(dir.spokenLabel)"
+        case .disk:
+            let (d, dir) = throughputDisplay(metric: snapshot.disk)
+            return "Disk \(d) \(dir.spokenLabel)"
         }
     }
 }
@@ -360,9 +516,7 @@ public struct GlyphRenderer {
 
 private extension NSImage {
     /// Returns a copy of the image with every non-transparent pixel
-    /// replaced by `color`. Used to tint SF Symbol template images for a
-    /// specific role without relying on the host context's ink color
-    /// (which doesn't apply in a custom drawingHandler).
+    /// replaced by `color`. Used to tint SF Symbol template images.
     func tinted(_ color: NSColor) -> NSImage {
         let out = NSImage(size: size)
         out.lockFocus()
