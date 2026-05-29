@@ -78,21 +78,35 @@ spike verdict, then exits:
 
 ## Features
 
-- **Live menu-bar readout** — fixed-width `NSImage` redrawn per tick (mini
-  bar + tabular `%`). The icon never jitters horizontally as digits change.
+- **Live multi-metric menu-bar readout** — `[cpu]35% [memorychip]60% │ [⇅]42M ▲ [drive]2M ▼`.
+  Each cell leads with an SF Symbol identity glyph; the CPU/MEM glyphs *are*
+  load gauges (bottom-up fill in label color, switching to yellow at warn /
+  red at critical). Pick any subset of CPU/MEM/NET/DISK in Settings.
 - **htop-density panel** on click — CPU header bar, per-core meter strip (P/E
-  asymmetry visible on Apple Silicon), memory + swap + pressure, top-25
-  process list with `[CPU | MEM]` sort toggle, system-wide network and disk
-  throughput, 60-second history sparklines for CPU and memory.
+  asymmetry visible on Apple Silicon), memory + swap + pressure, system-wide
+  network and disk throughput, 60-second history sparklines for CPU and
+  memory (memory graph auto-zooms into its narrow range so steady-state isn't
+  flat), and a top-25 process list.
+- **Process list interactions:**
+  - **Search** by name, case-insensitive
+  - **App icons** for processes packaged as `.app` (Chrome, your editor, …);
+    daemons / CLI binaries stay icon-less by design
+  - **Click a row to expand** → executable path + buttons: `Focus` (brings
+    the app forward, only for processes macOS classifies as regular apps),
+    `Copy kill -TERM`, `Copy kill -9`, `Copy path` — all copy literal
+    commands/strings to the clipboard
+  - **EMA-smoothed ranking** — bottom of the list stops slot-machining
+    because rank uses a 5-tick moving average; the displayed value is still
+    the raw current %
+  - **Freeze-on-hover** — pointer over the list pauses re-sorting
 - **Tiered sampling** — `< 1%` idle CPU is real, not theoretical (see
   [docs/04-acceptance.md](docs/04-acceptance.md) for the 5-minute measurement).
-- **Pre-populated graphs** — the idle tier keeps a shared 60-second history
-  ring buffer, so opening the panel shows existing trends *immediately* rather
-  than starting blank and filling over a minute.
-- **Freeze-on-hover** for the process list — pointer over rows pauses
-  re-ranking so you can click or scroll without slot-machine reordering.
-- **Stable sort tie-breaks** — near-tied processes (e.g. two at 3.1% / 3.0%)
-  break ties by the other metric then by PID, so they don't keep swapping.
+- **Live settings** — idle/open sampling cadence, menu-bar cells, process
+  count and default sort, launch-at-login. Every control wired to live
+  readers; no placeholders.
+- **Pre-populated graphs** — idle tier keeps a shared CPU/MEM history ring
+  buffer so opening the panel shows existing trends *immediately* rather than
+  starting blank and filling over a minute.
 - **Sleep / wake re-baseline** — `NSWorkspace.didWakeNotification` drops
   all baselines so the first sample after wake never displays a multi-hour
   cross-gap delta as a "CPU 4000%" spike.
@@ -219,12 +233,15 @@ terminal view of the same project shape.
 
 ## Status & what isn't shipped yet
 
-This is **v1**. Shipped: Phases 0 → 4 of the implementation plan, plus the
-Phase-6 acceptance sweep. Explicitly deferred:
+Phases 0–7 shipped, plus the Phase-6 acceptance sweep and the post-Phase-6
+icon-led bar redesign. Explicitly deferred:
 
-- **Phase 5 — Settings window.** Cadence, bar-readout metric/style, process
-  count, default sort, and launch-at-login (`SMAppService`). Every reader
-  site exists in the code; adding the window is mechanical.
+- **GPU in the bar.** Apple-Silicon GPU sampling needs `IOReport` (private
+  framework) or Metal SPI; the result is fragile across macOS versions. The
+  spec marks GPU as N1 from the start. Candidate for v2 after a spike.
+- **Pin a process by name** (always show it at top of the list). UX harder
+  than it looks for processes like "Chrome Helper" that have many instances
+  — needs design before code.
 - **Occlusion / Space-switch / display-disconnect handling.** Click-outside
   dismiss is wired; demoting to idle tier without dismissing on occlusion is
   a few-line follow-up.

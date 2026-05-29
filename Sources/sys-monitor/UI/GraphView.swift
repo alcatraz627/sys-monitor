@@ -11,20 +11,31 @@ import SwiftUI
 /// separate legend.
 struct GraphView: View {
 
+    /// How the graph maps values to vertical space.
+    enum ScaleMode {
+        /// Fixed range — what every graph used to do. Best when the data's
+        /// dynamic range is naturally well-known (e.g. CPU 0..1).
+        case fixed(ClosedRange<Double>)
+        /// Auto-zoom to the observed min/max within the window, padded.
+        /// `minSpan` keeps the graph from amplifying microscopic noise
+        /// (e.g. a steady-state system at 50% memory shouldn't draw a
+        /// roller-coaster trace from 0.502 → 0.504). Best when the
+        /// signal sits in a narrow band that fixed-range would flatten.
+        case auto(minSpan: Double)
+    }
+
     let buffer: RingBuffer
     let height: CGFloat
-    /// The value-space the graph normalizes to. CPU and memory both run
-    /// 0...1; bytes-per-second graphs (future) would use a different range.
-    let valueRange: ClosedRange<Double>
+    let scaleMode: ScaleMode
 
     init(
         buffer: RingBuffer,
         height: CGFloat = 26,
-        valueRange: ClosedRange<Double> = 0...1
+        scaleMode: ScaleMode = .fixed(0...1)
     ) {
         self.buffer = buffer
         self.height = height
-        self.valueRange = valueRange
+        self.scaleMode = scaleMode
     }
 
     var body: some View {
@@ -39,6 +50,7 @@ struct GraphView: View {
             let windowEnd = pts.last!.timestamp
             let windowStart = windowEnd - buffer.windowSeconds
             let span = max(buffer.windowSeconds, 0.001)
+            let valueRange = self.resolvedRange(points: pts)
             let valSpan = max(valueRange.upperBound - valueRange.lowerBound, 0.001)
 
             let xFor: (TimeInterval) -> CGFloat = { t in
@@ -76,5 +88,26 @@ struct GraphView: View {
                 .fill(Color.secondary.opacity(0.06))
         )
         .clipShape(RoundedRectangle(cornerRadius: 3))
+    }
+
+    /// Decide the y-axis range based on the scale mode. For `.auto`, snap
+    /// to the min/max of the visible window with a 10% pad — but never
+    /// less than `minSpan` so a flat trace doesn't become a noise plot.
+    private func resolvedRange(points: [HistoryPoint]) -> ClosedRange<Double> {
+        switch scaleMode {
+        case .fixed(let r):
+            return r
+        case .auto(let minSpan):
+            let values = points.map { $0.value }
+            guard let lo = values.min(), let hi = values.max() else { return 0...1 }
+            // Guard against minSpan = 0 callers — a true flat trace
+            // would otherwise divide by zero downstream.
+            let span = max(hi - lo, max(minSpan, 0.001))
+            let center = (lo + hi) / 2
+            let pad = span * 0.1
+            let low  = max(0, center - span / 2 - pad)
+            let high = min(1, center + span / 2 + pad)
+            return low...high
+        }
     }
 }

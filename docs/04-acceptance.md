@@ -19,8 +19,10 @@
 | 2 | Idle tier, `MetricsStore`, `SamplingCoordinator`, `GlyphRenderer` (NSImage), live menu-bar readout | ✓ shipped |
 | 3 | `DropPanel`, `PanelController`, open tier, full SwiftUI panel (CPU + per-core strip + memory + net/disk + process list + sort toggle), click-outside dismiss, sleep/wake re-baseline observer | ✓ shipped |
 | 4 | `GraphView` Path sparklines (CPU + memory history), freeze-on-hover for process list, stable secondary sort, disk-row-hide-when-unavailable | ✓ shipped |
-| 5 | Settings window + launch-at-login + wired controls | **deferred** |
+| 5 | Settings window + launch-at-login + wired controls | ✓ shipped (post-acceptance) |
 | 6 | Process-row VoiceOver labels, this acceptance sweep | partial (a11y minimal, ACs verified below) |
+| 6.5 (redesign) | Icon-led bar: glyph-as-gauge, single throughput value, SF Pro Rounded, color-rare | ✓ shipped |
+| 7 | Process interactions: search filter, click-to-expand, Focus / Copy-kill / Copy-path buttons, app icons, EMA-smoothed ranking, auto-scale memory graph, smoother bar animations | ✓ shipped |
 
 ---
 

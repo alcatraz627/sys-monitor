@@ -203,35 +203,31 @@ public struct GlyphRenderer {
     }
 
     /// Draws an SF Symbol with a load-fraction fill rising from the
-    /// bottom. The unfilled portion is `tertiaryLabelColor`; the filled
-    /// portion is `secondaryLabelColor` at normal load, `systemYellow` at
-    /// warn, `systemRed` at critical. The glyph IS the gauge.
+    /// bottom. Track (unfilled portion) is `quaternaryLabelColor`; fill
+    /// is `labelColor` at normal load, `systemYellow` at warn, `systemRed`
+    /// at critical. The glyph IS the gauge.
+    ///
+    /// Tinted images are pulled from a shared bounded cache to keep RSS
+    /// flat — each render would otherwise allocate two fresh NSImages per
+    /// CPU/MEM cell via `lockFocus`.
     private static func drawGaugeGlyph(
         symbol: String, pointSize: CGFloat, weight: NSFont.Weight,
         load: Double, severity: Severity,
         in rect: NSRect
     ) {
-        let config = NSImage.SymbolConfiguration(pointSize: pointSize, weight: weight)
-        guard
-            let base = NSImage(systemSymbolName: symbol, accessibilityDescription: nil),
-            let configured = base.withSymbolConfiguration(config)
-        else { return }
+        guard let trackImg = TintedGlyphCache.shared.tinted(
+            symbol: symbol, pointSize: pointSize, weight: weight,
+            color: .quaternaryLabelColor
+        ) else { return }
 
-        let s = configured.size
+        let s = trackImg.size
         let drawRect = NSRect(
             x: rect.minX + (rect.width - s.width) / 2,
             y: (rect.height - s.height) / 2,
             width: s.width, height: s.height
         )
+        trackImg.draw(in: drawRect)
 
-        // Background: dim "track" version of the glyph. Quaternary so
-        // the fill above it has real contrast on dark menu bars.
-        configured.tinted(.quaternaryLabelColor).draw(in: drawRect)
-
-        // Filled portion clipped to the bottom load-fraction. Fill uses
-        // full `labelColor` at normal load so the gauge is actually
-        // readable — secondary tint blends into the track and the gauge
-        // becomes invisible.
         let frac = CGFloat(min(max(load, 0), 1))
         guard frac > 0 else { return }
         let fillColor: NSColor = {
@@ -241,6 +237,10 @@ public struct GlyphRenderer {
             case .critical: return .systemRed
             }
         }()
+        guard let fillImg = TintedGlyphCache.shared.tinted(
+            symbol: symbol, pointSize: pointSize, weight: weight, color: fillColor
+        ) else { return }
+
         let fillHeight = s.height * frac
         let clipRect = NSRect(
             x: drawRect.minX, y: drawRect.minY,
@@ -248,7 +248,7 @@ public struct GlyphRenderer {
         )
         NSGraphicsContext.saveGraphicsState()
         NSBezierPath(rect: clipRect).addClip()
-        configured.tinted(fillColor).draw(in: drawRect)
+        fillImg.draw(in: drawRect)
         NSGraphicsContext.restoreGraphicsState()
     }
 
@@ -320,18 +320,16 @@ public struct GlyphRenderer {
         symbol: String, pointSize: CGFloat, weight: NSFont.Weight,
         color: NSColor, in rect: NSRect
     ) {
-        let config = NSImage.SymbolConfiguration(pointSize: pointSize, weight: weight)
-        guard
-            let base = NSImage(systemSymbolName: symbol, accessibilityDescription: nil),
-            let configured = base.withSymbolConfiguration(config)
-        else { return }
-        let s = configured.size
+        guard let img = TintedGlyphCache.shared.tinted(
+            symbol: symbol, pointSize: pointSize, weight: weight, color: color
+        ) else { return }
+        let s = img.size
         let drawRect = NSRect(
             x: rect.minX + (rect.width - s.width) / 2,
             y: (rect.height - s.height) / 2,
             width: s.width, height: s.height
         )
-        configured.tinted(color).draw(in: drawRect)
+        img.draw(in: drawRect)
     }
 
     fileprivate enum Direction {
@@ -512,19 +510,66 @@ public struct GlyphRenderer {
     }
 }
 
-// MARK: - Image tinting helper
+// MARK: - Tinted-glyph cache
+//
+// Memoizes tinted symbol images so repeated renders reuse the same
+// NSImage instances. The space of (symbol × color × point size × weight)
+// the bar draws from is small — a few dozen entries cover every
+// appearance — so a plain dictionary is enough.
+//
+// The NSLock + @unchecked Sendable is defensive: in practice the cache
+// is only touched from main during NSImage drawing, but AppKit doesn't
+// commit publicly to when image drawing handlers run, and the lock cost
+// is trivial.
 
-private extension NSImage {
-    /// Returns a copy of the image with every non-transparent pixel
-    /// replaced by `color`. Used to tint SF Symbol template images.
-    func tinted(_ color: NSColor) -> NSImage {
-        let out = NSImage(size: size)
+/// Identity for a cached tinted symbol image. NSColor doesn't conform to
+/// Hashable, so we key by its sRGB components rounded to 3 decimals —
+/// effectively identity for the system colors we draw with.
+private struct TintedGlyphKey: Hashable {
+    let symbol: String
+    let pointSize: Double
+    let weightRaw: Double
+    let colorR: Int
+    let colorG: Int
+    let colorB: Int
+    let colorA: Int
+
+    init(symbol: String, pointSize: CGFloat, weight: NSFont.Weight, color: NSColor) {
+        self.symbol = symbol
+        self.pointSize = Double(pointSize)
+        self.weightRaw = Double(weight.rawValue)
+        let rgb = color.usingColorSpace(.sRGB) ?? color
+        self.colorR = Int((rgb.redComponent   * 1000).rounded())
+        self.colorG = Int((rgb.greenComponent * 1000).rounded())
+        self.colorB = Int((rgb.blueComponent  * 1000).rounded())
+        self.colorA = Int((rgb.alphaComponent * 1000).rounded())
+    }
+}
+
+private final class TintedGlyphCache: @unchecked Sendable {
+    static let shared = TintedGlyphCache()
+    private let lock = NSLock()
+    private var store: [TintedGlyphKey: NSImage] = [:]
+
+    func tinted(
+        symbol: String, pointSize: CGFloat, weight: NSFont.Weight, color: NSColor
+    ) -> NSImage? {
+        let key = TintedGlyphKey(symbol: symbol, pointSize: pointSize, weight: weight, color: color)
+        lock.lock(); defer { lock.unlock() }
+        if let cached = store[key] { return cached }
+        let config = NSImage.SymbolConfiguration(pointSize: pointSize, weight: weight)
+        guard
+            let base = NSImage(systemSymbolName: symbol, accessibilityDescription: nil),
+            let configured = base.withSymbolConfiguration(config)
+        else { return nil }
+        let out = NSImage(size: configured.size)
         out.lockFocus()
         color.set()
-        let r = NSRect(origin: .zero, size: size)
+        let r = NSRect(origin: .zero, size: configured.size)
         r.fill(using: .sourceOver)
-        draw(at: .zero, from: r, operation: .destinationIn, fraction: 1.0)
+        configured.draw(at: .zero, from: r, operation: .destinationIn, fraction: 1.0)
         out.unlockFocus()
+        store[key] = out
         return out
     }
 }
