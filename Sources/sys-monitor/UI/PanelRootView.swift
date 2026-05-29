@@ -77,7 +77,9 @@ struct PanelRootView: View {
                 Text(cpuValueText)
                     .font(DesignTokens.numericFont(size: 12, weight: .medium))
             }
-            UsageBar(load: cpuLoad, height: 6)
+            // Sparkline carries "now + recent"; the per-core strip carries
+            // distribution. The overall bar was a third encoding of "now"
+            // and ate vertical real estate for no extra signal.
             GraphView(buffer: store.snapshot.cpuHistory)
             CoreStrip(loads: cpuPerCore)
         }
@@ -92,21 +94,35 @@ struct PanelRootView: View {
                 Text(memValueText)
                     .font(DesignTokens.numericFont(size: 12, weight: .medium))
             }
-            UsageBar(load: memLoad, height: 6)
-            // Memory stays in a narrow band (a healthy machine moves a few
-            // percent over a minute), so fixed 0...1 flattens it into a
-            // boring line. Auto-scale with 5% minimum span zooms into the
-            // variation without amplifying single-percent jitter.
+            // Auto-scale because memory sits in a narrow band; minSpan
+            // keeps the trace from amplifying single-percent jitter.
             GraphView(buffer: store.snapshot.memHistory,
                       scaleMode: .auto(minSpan: 0.05))
             HStack(spacing: DesignTokens.Space.m) {
                 Text("swap \(swapText)")
                 Spacer()
-                Text("pressure \(pressureText)")
+                HStack(spacing: 4) {
+                    Text("pressure").foregroundStyle(.secondary)
+                    Text(pressureText).foregroundStyle(pressureColor)
+                }
             }
             .font(DesignTokens.numericFont(size: 10))
             .foregroundStyle(.secondary)
         }
+    }
+
+    /// Pressure text takes the severity color from the enum: normal stays
+    /// secondary text, warn is orange, critical is red. The categorical
+    /// signal otherwise gets read as neutral the same as "swap 0.00 GB".
+    private var pressureColor: Color {
+        if case .ok(let s) = store.snapshot.memory {
+            switch s.pressure {
+            case .normal:   return .secondary
+            case .warn:     return .orange
+            case .critical: return .red
+            }
+        }
+        return .secondary
     }
 
     private var netDiskRow: some View {
@@ -144,8 +160,8 @@ struct PanelRootView: View {
                     Text("MEM").tag(SettingsStore.ProcSort.mem)
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 96)
-                .scaleEffect(0.85, anchor: .trailing)
+                .controlSize(.mini)
+                .frame(width: 80)
             }
             ProcessList(
                 metric: store.snapshot.processes,
@@ -595,55 +611,97 @@ private struct ExpandedRow: View {
                 Image(systemName: "folder")
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
-                Text(path ?? "(path unavailable — process may have exited or read denied)")
-                    .lineLimit(1)
-                    .truncationMode(.head)
-                    .font(DesignTokens.numericFont(size: 10))
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
+                pathText
             }
-            HStack(spacing: 6) {
+            HStack(spacing: 5) {
                 // Focus button only renders when macOS classifies the pid
                 // as a regular app (LSUIElement=false bundle). Daemons,
                 // CLI processes, and kernel tasks return nil here.
                 if NSRunningApplication(processIdentifier: pid) != nil {
                     focusButton(pid: pid)
                 }
-                copyButton(label: "Copy kill -TERM", command: "kill -TERM \(pid)")
-                copyButton(label: "Copy kill -9",   command: "kill -9 \(pid)")
+                // Short labels — the verb is the action, "copies to
+                // clipboard" lives in the tooltip. Severity tinting tells
+                // -TERM from -9 at a glance.
+                copyButton(label: "kill -TERM", command: "kill -TERM \(pid)", role: .warn)
+                copyButton(label: "kill -9",    command: "kill -9 \(pid)",    role: .destructive)
                 if let p = path {
-                    copyButton(label: "Copy path", command: p)
+                    copyButton(label: "path", command: p, role: .neutral)
                 }
                 Spacer()
             }
         }
         .padding(.leading, leadingIndent)
-        .padding(.vertical, 4)
+        .padding(.vertical, 5)
         .padding(.trailing, DesignTokens.Space.s)
-        .background(Color.secondary.opacity(0.06))
+        // Stronger contrast than secondary@0.06 so the expanded row reads
+        // as a contained sub-surface, not as a same-row continuation.
+        .background(
+            Color.black.opacity(0.18)
+                .overlay(alignment: .top) {
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.30))
+                        .frame(height: 0.5)
+                }
+        )
     }
 
-    private func copyButton(label: String, command: String) -> some View {
+    /// Path rendered as two segments: directory (head-truncated) + basename
+    /// (always visible). Lets the user see the binary name at the right
+    /// even when the folder context elides.
+    @ViewBuilder
+    private var pathText: some View {
+        let font = DesignTokens.numericFont(size: 10)
+        if let path {
+            let url = URL(fileURLWithPath: path)
+            let basename = url.lastPathComponent
+            let dirname = url.deletingLastPathComponent().path
+            HStack(spacing: 0) {
+                Text(dirname + "/")
+                    .lineLimit(1)
+                    .truncationMode(.head)
+                    .font(font)
+                    .foregroundStyle(.tertiary)
+                Text(basename)
+                    .font(font)
+                    .foregroundStyle(.secondary)
+            }
+            .textSelection(.enabled)
+        } else {
+            Text("(path unavailable — process may have exited or read denied)")
+                .lineLimit(1)
+                .font(font)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    enum ButtonRole { case neutral, warn, destructive }
+
+    private func copyButton(label: String, command: String, role: ButtonRole = .neutral) -> some View {
         Button(action: {
             let pb = NSPasteboard.general
             pb.clearContents()
             pb.setString(command, forType: .string)
         }) {
-            HStack(spacing: 3) {
-                Image(systemName: "doc.on.doc")
-                    .font(.system(size: 9))
-                Text(label)
-                    .font(DesignTokens.numericFont(size: 10))
-            }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(
-                RoundedRectangle(cornerRadius: 3)
-                    .fill(Color.secondary.opacity(0.15))
-            )
+            Text(label)
+                .font(DesignTokens.numericFont(size: 10))
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(roleFill(role))
+                )
         }
         .buttonStyle(.plain)
-        .help(command)
+        .help("Copy to clipboard: \(command)")
+    }
+
+    private func roleFill(_ role: ButtonRole) -> Color {
+        switch role {
+        case .neutral:     return Color.secondary.opacity(0.18)
+        case .warn:        return Color.orange.opacity(0.20)
+        case .destructive: return Color.red.opacity(0.20)
+        }
     }
 
     private func focusButton(pid: Int32) -> some View {
@@ -660,11 +718,11 @@ private struct ExpandedRow: View {
                 Text("Focus")
                     .font(DesignTokens.numericFont(size: 10))
             }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
             .background(
                 RoundedRectangle(cornerRadius: 3)
-                    .fill(Color.accentColor.opacity(0.18))
+                    .fill(Color.accentColor.opacity(0.22))
             )
         }
         .buttonStyle(.plain)

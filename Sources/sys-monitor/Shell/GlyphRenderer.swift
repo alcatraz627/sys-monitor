@@ -131,11 +131,11 @@ public struct GlyphRenderer {
     }
 
     private static func drawSeparator(atX x: CGFloat) {
-        // 1pt rect at tertiary alpha — quaternary disappeared on dark menu
-        // bars and read as nothing; tertiary registers as a hairline.
+        // 1pt labelColor at 30% alpha — tertiary still washes out against
+        // vibrant menu-bar materials; this registers on any background.
         let y = (height - separatorHeight) / 2
         let rect = NSRect(x: x, y: y, width: separatorWidth, height: separatorHeight)
-        NSColor.tertiaryLabelColor.setFill()
+        NSColor.labelColor.withAlphaComponent(0.30).setFill()
         rect.fill()
     }
 
@@ -162,8 +162,10 @@ public struct GlyphRenderer {
                 in: rect
             )
         case .net:
+            // `network` carries identity without implying direction —
+            // direction is shown by the trailing ▲/▼/• triangle.
             drawThroughputCell(
-                symbol: "arrow.up.arrow.down",
+                symbol: "network",
                 metric: snapshot.net,
                 in: rect
             )

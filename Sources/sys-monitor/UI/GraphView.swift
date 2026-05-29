@@ -78,9 +78,12 @@ struct GraphView: View {
             area.addLine(to: CGPoint(x: xFor(pts.first!.timestamp), y: size.height))
             area.closeSubpath()
 
+            // Line carries the load-color signal; area is a thin wash so
+            // a long full-color region doesn't read as if the metric were
+            // pinned at max. Alpha kept low on purpose.
             let color = DesignTokens.loadColor(pts.last?.value ?? 0)
-            ctx.fill(area, with: .color(color.opacity(0.16)))
-            ctx.stroke(line, with: .color(color), lineWidth: 1.2)
+            ctx.fill(area, with: .color(color.opacity(0.10)))
+            ctx.stroke(line, with: .color(color), lineWidth: 1.4)
         }
         .frame(height: height)
         .background(
