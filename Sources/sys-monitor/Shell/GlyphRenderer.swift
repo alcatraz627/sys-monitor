@@ -21,8 +21,8 @@ public struct GlyphRenderer {
     private let arrowFont: NSFont
     private let arrowW: CGFloat
 
-    // Variant A — selected from the preview. If we ever offer multiple
-    // densities, fork these into a `Style` enum.
+    // Single bar density. Fork these into a `Style` enum if a second
+    // density (compact / spacious) is ever offered.
     private static let iconPt:       CGFloat = 17
     private static let iconWeight: NSFont.Weight = .bold
     private static let barW:         CGFloat = 16
@@ -128,10 +128,13 @@ public struct GlyphRenderer {
         return Self.iconPt + Self.elementGap + halfW + Self.elementGap + halfW
     }
 
-    /// 5-char monospaced width — matches every value `formatBps` can
-    /// produce, so no width changes per tick.
+    /// 5-char reserved width — wide enough for every value `formatBps`
+    /// can produce. `monospacedDigitSystemFont` guarantees digit
+    /// monospace but not letter monospace, so the M/G/K suffixes can
+    /// differ in width; take the max across units.
     private var throughputValueReservedW: CGFloat {
-        Self.measure("999MB", font: valueFont)
+        max(Self.measure("999MB", font: valueFont),
+            Self.measure("999GB", font: valueFont))
     }
 
     public func accessibilityValue(snapshot: MetricsSnapshot) -> String {
@@ -398,26 +401,47 @@ public struct GlyphRenderer {
         return -1
     }
 
-    /// Throughput formatter — **always 5 characters** in a monospaced
-    /// font, so the rendered width never changes regardless of magnitude.
-    /// Truly-zero values render as 5 spaces — the arrow's dimming alone
-    /// conveys "nothing happening", a literal `0` was redundant noise.
+    /// Throughput formatter — **always 5 characters**, so the rendered
+    /// width never changes regardless of magnitude. Truly-zero values
+    /// render as 5 spaces — the arrow's dimming alone conveys "nothing
+    /// happening", a literal `0` was redundant noise.
+    ///
+    /// Magnitude bump rule: each tier promotes to the next when the
+    /// lower-tier value would round to 4 digits (≥ 999.5), not at the
+    /// power-of-1024 boundary. `%3.0fXB` rounds the float, so without
+    /// this rule `999.7 MB/s` formats as `"1000MB"` — 6 chars — and
+    /// the cell clips. NVMe sequential reads on Apple Silicon hit
+    /// 3–7 GB/s routinely, so the GB tier is reachable in practice.
+    ///
     /// Output examples:
-    ///   "  1KB"  " 12KB"  "999KB"  "1.5MB"  " 99MB"  "999MB"  "     "  "    —"
+    ///   "  1KB"  " 12KB"  "999KB"  "1.0MB"  " 99MB"  "999MB"
+    ///   "1.0GB"  " 10GB"  "999GB"  "     "  "    —"
     private static func formatBps(_ v: Double) -> String {
         if v < 0    { return "    —" }     // measuring / unavailable
         if v < 50   { return "     " }     // truly zero — let the arrow opacity speak
         if v < 1024 { return "  1KB" }     // sub-KB clamps to 1KB
-        if v >= 1_048_576 {
-            let mb = v / 1_048_576
+
+        let kb = v / 1024
+        if kb < 999.5 {
+            if kb >= 100 { return String(format: "%3.0fKB", kb) }
+            if kb >= 10  { return String(format: " %2.0fKB", kb) }
+            return String(format: "  %.0fKB", kb)
+        }
+
+        let mb = v / 1_048_576
+        if mb < 999.5 {
             if mb >= 100 { return String(format: "%3.0fMB", mb) }
             if mb >= 10  { return String(format: " %2.0fMB", mb) }
             return String(format: "%.1fMB", mb)
         }
-        let kb = v / 1024
-        if kb >= 100 { return String(format: "%3.0fKB", kb) }
-        if kb >= 10  { return String(format: " %2.0fKB", kb) }
-        return String(format: "  %.0fKB", kb)
+
+        // ≥ TB territory would re-introduce the 4-digit overflow; cap
+        // at 999GB since that's already an order of magnitude beyond
+        // any practical disk or NIC on a personal Mac.
+        let gb = min(v / 1_073_741_824, 999)
+        if gb >= 100 { return String(format: "%3.0fGB", gb) }
+        if gb >= 10  { return String(format: " %2.0fGB", gb) }
+        return String(format: "%.1fGB", gb)
     }
 
     private static func accessibilityFor(cell: BarCell, snapshot: MetricsSnapshot) -> String {

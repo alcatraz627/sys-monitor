@@ -62,8 +62,9 @@ private struct PreviewRoot: View {
                         ("B: globe",                                    "Simple outline globe"),
                         ("C: wifi",                                     "WiFi fan (radio waves up)"),
                         ("D: antenna.radiowaves.left.and.right",        "Antenna with arc waves both sides"),
-                        ("E: dot.radiowaves.up.forward",                "Dot emitting waves (CURRENT)"),
+                        ("E: dot.radiowaves.up.forward",                "Dot emitting waves"),
                         ("F: point.3.filled.connected.trianglepath.dotted", "Three connected nodes"),
+                        ("G: cellularbars",                             "Cellular signal bars (CURRENT)"),
                     ]
                 )
 
