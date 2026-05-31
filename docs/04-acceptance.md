@@ -23,6 +23,7 @@
 | 6 | Process-row VoiceOver labels, this acceptance sweep | partial (a11y minimal, ACs verified below) |
 | 6.5 (redesign) | Icon-led bar: glyph-as-gauge, single throughput value, SF Pro Rounded, color-rare | ✓ shipped |
 | 7 | Process interactions: search filter, click-to-expand, Focus / Copy-kill / Copy-path buttons, app icons, EMA-smoothed ranking, auto-scale memory graph, smoother bar animations | ✓ shipped |
+| 7.5 (bar v2) | Icon · bar · value grammar; per-cell identity colors (cpu golden, mem teal, net purple, disk slate-blue); 5-char fixed-width monospaced throughput; log-scale activity-brightness + saturation arrows (toggleable); `cellularbars` for net | ✓ shipped |
 
 ---
 

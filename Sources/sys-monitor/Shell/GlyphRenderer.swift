@@ -161,8 +161,11 @@ public struct GlyphRenderer {
                 identityColor: identity, in: rect
             )
         case .net:
+            // Cellular bars: reads as "signal strength" universally and
+            // gives the bar row a distinct silhouette from cpu/mem chip
+            // shapes and disk's flat puck.
             drawThroughputCell(
-                symbol: "dot.radiowaves.up.forward",
+                symbol: "cellularbars",
                 downBps: Self.netDownBps(snapshot),
                 upBps:   Self.netUpBps(snapshot),
                 identityColor: identity, in: rect
@@ -275,10 +278,6 @@ public struct GlyphRenderer {
     // MARK: - Drawing primitives
 
     private func drawIcon(_ symbol: String, color: NSColor, in rect: NSRect) {
-        if symbol == "__custom_memory" {
-            Self.drawCustomMemoryIcon(in: rect, color: color)
-            return
-        }
         guard let img = TintedGlyphCache.shared.tinted(
             symbol: symbol, pointSize: Self.iconPt, weight: Self.iconWeight,
             color: color
@@ -290,56 +289,6 @@ public struct GlyphRenderer {
             width: s.width, height: s.height
         )
         img.draw(in: drawRect)
-    }
-
-    /// Hand-drawn chip-with-legs icon. Body = rounded rectangle outline
-    /// occupying the top ~75% of the icon area; 5 short vertical lines
-    /// below as legs/pins; a small center dot for visual weight. Stroke
-    /// is heavy enough that the legs read at menu-bar size.
-    private static func drawCustomMemoryIcon(in rect: NSRect, color: NSColor) {
-        let cellSize = min(rect.width, rect.height)
-        let cx = rect.midX
-        let cy = rect.midY
-        let icon = NSRect(
-            x: cx - cellSize / 2, y: cy - cellSize / 2,
-            width: cellSize, height: cellSize
-        )
-
-        color.setFill()
-        color.setStroke()
-
-        let strokeW: CGFloat = 1.5
-        let legH:     CGFloat = max(3, cellSize * 0.20)
-        let bodyHPad: CGFloat = max(1, cellSize * 0.08)
-
-        let bodyRect = NSRect(
-            x: icon.minX + bodyHPad,
-            y: icon.minY + legH + 1,
-            width: icon.width - bodyHPad * 2,
-            height: icon.height - legH - 2
-        )
-        let body = NSBezierPath(roundedRect: bodyRect, xRadius: 1.5, yRadius: 1.5)
-        body.lineWidth = strokeW
-        body.stroke()
-
-        // Small center dot — gives the empty chip body something to look at.
-        let dotR: CGFloat = max(0.8, cellSize * 0.07)
-        let dot = NSRect(
-            x: bodyRect.midX - dotR, y: bodyRect.midY - dotR,
-            width: dotR * 2, height: dotR * 2
-        )
-        NSBezierPath(ovalIn: dot).fill()
-
-        // 5 legs at the bottom, evenly spaced across the body width.
-        let legCount = 5
-        let legW: CGFloat = max(1.0, cellSize * 0.09)
-        let totalLegs = CGFloat(legCount) * legW
-        let span = bodyRect.width - totalLegs
-        let gap = span / CGFloat(legCount + 1)
-        for i in 0..<legCount {
-            let x = bodyRect.minX + gap + CGFloat(i) * (legW + gap)
-            NSBezierPath(rect: NSRect(x: x, y: icon.minY, width: legW, height: legH)).fill()
-        }
     }
 
     private func drawBar(load: Double, severity: Severity, in rect: NSRect) {

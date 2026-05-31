@@ -78,10 +78,15 @@ spike verdict, then exits:
 
 ## Features
 
-- **Live multi-metric menu-bar readout** — `[cpu]35% [memorychip]60% │ [⇅]42M ▲ [drive]2M ▼`.
-  Each cell leads with an SF Symbol identity glyph; the CPU/MEM glyphs *are*
-  load gauges (bottom-up fill in label color, switching to yellow at warn /
-  red at critical). Pick any subset of CPU/MEM/NET/DISK in Settings.
+- **Live multi-metric menu-bar readout** — `[cpu]▆▆▆ 35%  [chip]▅▅  60%  [bars]↓ 12KB ↑  1KB  [disc]↓ 2.1MB ↑  144KB`.
+  Each cell follows an **icon · bar · value** grammar with a fixed identity
+  color per metric (cpu=golden, mem=teal, net=purple, disk=slate-blue) so the
+  cells read like wifi/battery/bluetooth icons — same hue every time, the
+  reader pattern-matches in one glance. Throughput cells use a 5-char
+  monospaced format so width never jitters as magnitudes cross; the down/up
+  arrows dim *and* desaturate on a log curve of the rate as an ambient
+  "is this direction alive?" signal (toggleable). Pick any subset of
+  CPU/MEM/NET/DISK in Settings.
 - **htop-density panel** on click — CPU header bar, per-core meter strip (P/E
   asymmetry visible on Apple Silicon), memory + swap + pressure, system-wide
   network and disk throughput, 60-second history sparklines for CPU and
@@ -233,8 +238,11 @@ terminal view of the same project shape.
 
 ## Status & what isn't shipped yet
 
-Phases 0–7 shipped, plus the Phase-6 acceptance sweep and the post-Phase-6
-icon-led bar redesign. Explicitly deferred:
+Phases 0–7 shipped, plus the Phase-6 acceptance sweep, the post-Phase-6
+icon-led bar redesign (v1: glyph-as-gauge), and the post-Phase-7 bar v2
+polish (icon · bar · value grammar with identity colors, fixed-width 5-char
+throughput formatting, log-scale activity-brightness arrows). Explicitly
+deferred:
 
 - **GPU in the bar.** Apple-Silicon GPU sampling needs `IOReport` (private
   framework) or Metal SPI; the result is fragile across macOS versions. The
@@ -248,7 +256,8 @@ icon-led bar redesign. Explicitly deferred:
 - **Reduce Motion / Increase Contrast plumbing** for the panel sections.
   Per-process VoiceOver labels are wired; the rest of NFR-9 isn't.
 - **Distribution & notarization.** Personal/local use only by design;
-  there's no `LICENSE` file or signing identity yet.
+  ad-hoc-signed for the author's machine with no Developer ID or
+  notarization. (See [LICENSE](LICENSE) for permitted use.)
 
 See [`docs/04-acceptance.md`](docs/04-acceptance.md) §6 for the full
 deferred-items list.
@@ -257,9 +266,9 @@ deferred-items list.
 
 ## License
 
-No license has been added yet — this is currently a personal/local-use
-project, ad-hoc-signed for the author's machine. If you intend to fork or
-distribute, please open an issue first.
+[MIT](LICENSE). The binary itself is only ad-hoc-signed for the author's
+machine — if you fork and intend to distribute a built `.app`, you'll need
+your own Developer ID and notarization pass.
 
 ---
 

@@ -54,7 +54,18 @@ private struct PreviewRoot: View {
                 .padding(.horizontal)
                 .padding(.top, 16)
 
-                memoryComparisonRow
+                iconRow(
+                    title: "Network icon options — purple identity (pick by letter)",
+                    color: .systemPurple,
+                    candidates: [
+                        ("A: network",                                  "Globe + latitude lines"),
+                        ("B: globe",                                    "Simple outline globe"),
+                        ("C: wifi",                                     "WiFi fan (radio waves up)"),
+                        ("D: antenna.radiowaves.left.and.right",        "Antenna with arc waves both sides"),
+                        ("E: dot.radiowaves.up.forward",                "Dot emitting waves (CURRENT)"),
+                        ("F: point.3.filled.connected.trianglepath.dotted", "Three connected nodes"),
+                    ]
+                )
 
                 Text("How to call it out: '\(slugCallout)'")
                     .font(.system(size: 10))
@@ -218,9 +229,11 @@ private struct PreviewRoot: View {
                 .font(.system(size: 14, weight: .semibold))
                 .padding(.horizontal)
             HStack(spacing: 12) {
-                ForEach(candidates, id: \.0) { (slug, desc) in
+                ForEach(candidates, id: \.0) { (slugWithPrefix, desc) in
+                    // Strip "A: " etc. prefix from the slug to get the SF Symbol name.
+                    let parts = slugWithPrefix.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+                    let slug = parts.count == 2 ? parts[1] : slugWithPrefix
                     VStack(spacing: 6) {
-                        // 80×54pt swatch with menu-bar-like background
                         ZStack {
                             LinearGradient(
                                 colors: [Color(red: 0.10, green: 0.18, blue: 0.55),
@@ -234,7 +247,7 @@ private struct PreviewRoot: View {
                         }
                         .frame(width: 80, height: 54)
                         .clipShape(RoundedRectangle(cornerRadius: 6))
-                        Text(slug)
+                        Text(slugWithPrefix)
                             .font(.system(size: 10, design: .monospaced))
                             .lineLimit(2)
                             .multilineTextAlignment(.center)
