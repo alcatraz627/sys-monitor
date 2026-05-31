@@ -22,6 +22,13 @@ MainActor.assumeIsolated {
         exit(0)
     }
 
+    if CommandLine.arguments.contains("--preview-widget") {
+        let app = NSApplication.shared
+        WidgetPreview.show()
+        app.run()
+        exit(0)
+    }
+
     let app = NSApplication.shared
     let delegate = AppDelegate()
     app.delegate = delegate

@@ -18,10 +18,11 @@ final class StatusItemController {
     init(
         store: MetricsStore,
         cells: [BarCell] = [.cpu, .mem],
+        activityArrows: Bool = true,
         onClick: @escaping () -> Void
     ) {
         self.store = store
-        self.renderer = GlyphRenderer(cells: cells)
+        self.renderer = GlyphRenderer(cells: cells, activityArrows: activityArrows)
         self.statusItem = NSStatusBar.system.statusItem(
             withLength: NSStatusItem.variableLength
         )
@@ -48,8 +49,8 @@ final class StatusItemController {
     /// Swap the bar-cell layout at runtime (settings change). Rebuilds
     /// the renderer with new reserved-width and per-cell rules, then
     /// redraws against the current snapshot.
-    func updateCells(_ cells: [BarCell]) {
-        renderer = GlyphRenderer(cells: cells)
+    func updateCells(_ cells: [BarCell], activityArrows: Bool) {
+        renderer = GlyphRenderer(cells: cells, activityArrows: activityArrows)
         redraw(snapshot: store.snapshot)
     }
 

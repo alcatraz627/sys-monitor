@@ -163,12 +163,14 @@ public final class SamplingCoordinator: @unchecked Sendable {
     private func transitionToIdle() {
         openTimer?.cancel()
         openTimer = nil
-        // The open-only counters don't exist in idle tier; drop them so a
-        // future re-open doesn't compute a stale delta. Overall CPU + memory
-        // continue using whatever prev they had.
+        // Per-core and process state are open-tier only — drop them so a
+        // stale value never gets reused. NET/DISK prevs ARE preserved:
+        // if the user keeps those in the bar, the idle tier also samples
+        // them, so the rate keeps computing across the transition. The
+        // gap-based re-baseline in readNet/readDisk handles the case
+        // where idle doesn't sample them (stale prev is detected by
+        // elapsed > N×tick).
         prevPerCore = nil
-        prevNet = nil
-        prevDisk = nil
         prevProcCpu.removeAll(keepingCapacity: true)
 
         startTimer(
@@ -182,12 +184,12 @@ public final class SamplingCoordinator: @unchecked Sendable {
     private func transitionToOpen() {
         idleTimer?.cancel()
         idleTimer = nil
-        // First open tick is a baseline for the open-only counters: drop
-        // their prevs so we don't compute a delta across an arbitrary gap
-        // (could be hours since the panel was last opened).
+        // Per-core/process are open-tier only and need fresh baselines.
+        // NET/DISK prevs survive — if idle tier was sampling them, they
+        // are fresh and the next open tick can emit a rate immediately.
+        // If idle wasn't sampling them, the gap-based re-baseline
+        // triggers automatically.
         prevPerCore = nil
-        prevNet = nil
-        prevDisk = nil
         prevProcCpu.removeAll(keepingCapacity: true)
 
         startTimer(

@@ -40,7 +40,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let statusItemController = StatusItemController(
             store: store,
-            cells: settings.barCells.ordered
+            cells: settings.barCells.ordered,
+            activityArrows: settings.arrowActivityIndicator
         ) { [weak panelController] in
             panelController?.toggle()
         }
@@ -73,11 +74,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .store(in: &cancellables)
 
         settings.$barCells.dropFirst()
-            .sink { [weak statusItemController, weak coordinator] cells in
-                statusItemController?.updateCells(cells.ordered)
+            .sink { [weak statusItemController, weak coordinator, weak settings] cells in
+                statusItemController?.updateCells(
+                    cells.ordered,
+                    activityArrows: settings?.arrowActivityIndicator ?? true
+                )
                 coordinator?.configureIdleSamplers(
                     net:  cells.contains(.net),
                     disk: cells.contains(.disk)
+                )
+            }
+            .store(in: &cancellables)
+
+        settings.$arrowActivityIndicator.dropFirst()
+            .sink { [weak statusItemController, weak settings] on in
+                statusItemController?.updateCells(
+                    settings?.barCells.ordered ?? [.cpu, .mem],
+                    activityArrows: on
                 )
             }
             .store(in: &cancellables)

@@ -47,6 +47,9 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                         .font(.caption)
                 }
+                Toggle("Activity-brightness arrows (NET / DISK)",
+                       isOn: $settings.arrowActivityIndicator)
+                    .help("Arrow brightness scales logarithmically with throughput — dim at idle, bright at high transfer. No animation, no extra CPU.")
             }
 
             Section("Process list") {

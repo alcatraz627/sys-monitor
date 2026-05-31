@@ -128,13 +128,13 @@ struct PanelRootView: View {
     private var netDiskRow: some View {
         HStack(spacing: DesignTokens.Space.m) {
             ThroughputCell(label: "NET", metric: store.snapshot.net,
-                           inLabel: "↓", outLabel: "↑")
+                           activity: settings.arrowActivityIndicator)
             // Hide the disk cell entirely when the sampler is permanently
-            // unavailable — better than showing "R — W —" forever, which
-            // reads as "broken" rather than "doesn't apply on this Mac."
+            // unavailable — better than showing empty values forever,
+            // which reads as "broken" rather than "doesn't apply on this Mac."
             if !diskUnavailable {
                 ThroughputCell(label: "DISK", metric: store.snapshot.disk,
-                               inLabel: "R", outLabel: "W")
+                               activity: settings.arrowActivityIndicator)
             }
         }
     }
@@ -430,8 +430,7 @@ private struct CoreStrip: View {
 private struct ThroughputCell: View {
     let label: String
     let metric: Metric<Throughput>
-    let inLabel: String
-    let outLabel: String
+    let activity: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -439,21 +438,56 @@ private struct ThroughputCell: View {
                 .font(DesignTokens.numericFont(size: 10, weight: .semibold))
                 .foregroundStyle(.secondary)
             HStack(spacing: DesignTokens.Space.s) {
-                Text("\(inLabel) \(inText)")
-                Text("\(outLabel) \(outText)")
+                HStack(spacing: 2) {
+                    Text("↓")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(arrowColor(base: .systemGreen, bps: inBps))
+                    Text(inText).font(DesignTokens.numericFont(size: 11))
+                }
+                HStack(spacing: 2) {
+                    Text("↑")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(arrowColor(base: .systemRed, bps: outBps))
+                    Text(outText).font(DesignTokens.numericFont(size: 11))
+                }
             }
-            .font(DesignTokens.numericFont(size: 11))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var inText: String {
-        if case .ok(let t) = metric { return formatBps(t.inPerSec) }
-        return "—"
+    private var inBps: Double {
+        if case .ok(let t) = metric { return max(0, t.inPerSec) }
+        return -1
     }
-    private var outText: String {
-        if case .ok(let t) = metric { return formatBps(t.outPerSec) }
-        return "—"
+    private var outBps: Double {
+        if case .ok(let t) = metric { return max(0, t.outPerSec) }
+        return -1
+    }
+    private var inText: String  { formatBps(inBps) }
+    private var outText: String { formatBps(outBps) }
+
+    /// Same brightness + saturation treatment the menu-bar widget uses,
+    /// implemented in NSColor (macOS 13 compatible — SwiftUI's
+    /// `Color.mix` requires 15+).
+    private func arrowColor(base: NSColor, bps: Double) -> Color {
+        guard activity else { return Color(nsColor: base) }
+        let frac: CGFloat
+        if bps < 100 { frac = 0 }
+        else {
+            let maxLog = log10(10.0 * 1_048_576.0)
+            let bpsLog = log10(max(bps, 100))
+            frac = max(0, min(1, CGFloat(bpsLog / maxLog)))
+        }
+        let alpha = 0.30 + 0.70 * frac
+        let satBuckets: [CGFloat] = [0.10, 0.40, 0.70, 1.00]
+        let bucket = min(3, Int(frac * 4))
+        let sScale = satBuckets[bucket]
+
+        let sRGB = base.usingColorSpace(.sRGB) ?? base
+        var h: CGFloat = 0, s: CGFloat = 0, v: CGFloat = 0, a: CGFloat = 0
+        sRGB.getHue(&h, saturation: &s, brightness: &v, alpha: &a)
+        let final = NSColor(hue: h, saturation: s * sScale, brightness: v, alpha: alpha)
+        return Color(nsColor: final)
     }
 }
 

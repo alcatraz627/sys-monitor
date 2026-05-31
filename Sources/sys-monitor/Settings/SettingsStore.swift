@@ -58,6 +58,7 @@ public final class SettingsStore: ObservableObject {
     private static let kCount = "processCount"
     private static let kSort  = "defaultSort"
     private static let kLogin = "launchAtLogin"
+    private static let kArrowActivity = "arrowActivityIndicator"
 
     @Published public var idleCadenceSeconds: Double {
         didSet {
@@ -82,6 +83,9 @@ public final class SettingsStore: ObservableObject {
     }
     @Published public var launchAtLogin: Bool {
         didSet { defaults.set(launchAtLogin, forKey: Self.kLogin) }
+    }
+    @Published public var arrowActivityIndicator: Bool {
+        didSet { defaults.set(arrowActivityIndicator, forKey: Self.kArrowActivity) }
     }
 
     /// Read-only status of the actual login-item registration, refreshed
@@ -109,6 +113,9 @@ public final class SettingsStore: ObservableObject {
         self.defaultSort = ProcSort(rawValue: defaults.string(forKey: Self.kSort) ?? "")
             ?? .cpu
         self.launchAtLogin = defaults.bool(forKey: Self.kLogin)
+        // Default ON — the brightness step is free (no perf cost) and
+        // makes the NET / DISK arrows feel "live."
+        self.arrowActivityIndicator = (defaults.object(forKey: Self.kArrowActivity) as? Bool) ?? true
     }
 
     /// idle cadence must be >= open cadence (idle is the always-on budget
