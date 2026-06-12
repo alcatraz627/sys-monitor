@@ -571,16 +571,19 @@ public final class SamplingCoordinator: @unchecked Sendable {
         // whole prev map and the next success re-baselines.
         do { raws = try procSampler.read() } catch {
             prevProcCpu.removeAll(keepingCapacity: true)
-        prevProcDisk.removeAll(keepingCapacity: true)
-        prevProcNet.removeAll(keepingCapacity: true)
+            prevProcDisk.removeAll(keepingCapacity: true)
+            prevProcNet.removeAll(keepingCapacity: true)
             lastProcSampleTime = 0
             return .unavailable
         }
         lastProcSampleTime = now
 
         // Per-pid cumulative network bytes from the private-framework
-        // monitor (empty when it's unavailable). Snapshot once per tick.
-        let netByPid = netMonitor.cumulativeBytesByPid()
+        // monitor (empty when it's unavailable). Snapshot once per tick,
+        // passing the live pid set so the monitor can prune retired bytes
+        // for processes that have exited.
+        let livePids = Set(raws.map { $0.pid })
+        let netByPid = netMonitor.cumulativeBytesByPid(livePids: livePids)
 
         // Build the next prev maps regardless, so the next tick can
         // delta even if this one returns `.measuring`.

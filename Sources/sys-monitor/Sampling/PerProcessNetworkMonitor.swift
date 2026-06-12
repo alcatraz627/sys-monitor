@@ -88,21 +88,35 @@ final class PerProcessNetworkMonitor: @unchecked Sendable {
         }
     }
 
-    /// Stop querying (idle tier). The manager stays alive but goes quiet.
+    /// Stop querying (idle tier). The manager stays alive but goes quiet;
+    /// drop the accumulated flow state so it can't grow while we're not
+    /// even reading it (new-source/removed callbacks keep firing on the
+    /// live manager regardless of the query timer). The next `start()`
+    /// re-baselines from scratch — correct, because the coordinator
+    /// clears `prevProcNet` on every tier transition anyway.
     func stop() {
         queue.async { [weak self] in
             guard let self else { return }
             self.queryTimer?.cancel()
             self.queryTimer = nil
             self.started = false
+            self.liveFlows.removeAll()
+            self.retired.removeAll()
         }
     }
 
     /// Monotonic cumulative rx+tx bytes per pid, for the coordinator to
     /// delta. Empty when unavailable.
-    func cumulativeBytesByPid() -> [Int32: UInt64] {
+    ///
+    /// `livePids` (the current process set) prunes the `retired` bucket
+    /// to processes that still exist — a panel left open for days would
+    /// otherwise keep one retired entry per pid ever seen. A dead pid's
+    /// retired bytes are safe to drop: if its number is recycled, the new
+    /// process's flows re-baseline from zero.
+    func cumulativeBytesByPid(livePids: Set<Int32>) -> [Int32: UInt64] {
         queue.sync {
             guard isAvailable else { return [:] }
+            retired = retired.filter { livePids.contains($0.key) }
             var out = retired
             for (_, flow) in liveFlows where flow.pid > 0 {
                 if let base = flow.baseline, flow.latest >= base {
