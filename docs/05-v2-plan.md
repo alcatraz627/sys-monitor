@@ -126,6 +126,24 @@ actionable, cheap always-on):
   degrade-to-unavailable contract. Once counters flow, NET joins the
   sort control and `>N:net` lands in the threshold filter exactly like
   disk did.
+  **SHIPPED 2026-06-13** (`PerProcessNetworkMonitor`). Counter delivery
+  resolved by the spike: the counts-only `QueryAllSources` does NOT
+  refresh per-flow byte totals on macOS 26; the combined
+  `QueryAllSourcesUpdate` does (fallback to the former on older OSes).
+  Two bugs caught in verification and fixed before shipping: (1) a
+  pre-existing flow dumped its entire lifetime total into one tick as a
+  phantom multi-Gbps spike — fixed with per-flow baselining (a flow
+  contributes only bytes observed while watched; closed flows retire
+  them); (2) counts blocks fire with pid=0 before the description
+  resolves — fixed by forcing `NStatSourceQueryDescription` in the
+  new-source block. Verification limit, stated honestly: the sandbox
+  network was throttled to ~200 B/s, so HIGH-rate attribution is
+  unconfirmed here — light-traffic attribution is correct and the
+  phantom-spike class is gone, but heavy-talker capture needs a real
+  network. Platform limitation (same as Activity Monitor / nettop):
+  relayed traffic (VPN / iCloud Private Relay / Network Extension)
+  attributes to the tunnel process, not the origin app. Open-tier only;
+  the NET sort tab hides when the framework doesn't resolve.
 - **Battery / power cell**: battery %, charging state, and (Apple
   Silicon) watts via the public `IOPSCopyPowerSourcesInfo` — cheap,
   public API, huge glance value on MacBooks. Bar cell + panel row.
