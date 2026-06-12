@@ -176,7 +176,14 @@ struct PanelRootView: View {
             )
             .onHover { hovering in
                 if hovering {
-                    hoverFrozenPids = rankedProcesses.map(\.pid)
+                    // Never freeze an EMPTY order. The panel opens under
+                    // the cursor, so hover usually begins while processes
+                    // are still measuring — freezing [] would pin the
+                    // list empty for the whole hover. Stay live until
+                    // there's a real order to freeze; the cost is one
+                    // unfrozen reorder under the cursor when data lands.
+                    let pids = rankedProcesses.map(\.pid)
+                    hoverFrozenPids = pids.isEmpty ? nil : pids
                 } else {
                     hoverFrozenPids = nil
                 }
@@ -263,7 +270,9 @@ struct PanelRootView: View {
     /// or were below the display cap when it began — stay out until the
     /// hover ends.
     private var displayedProcesses: [ProcSample] {
-        guard let frozen = hoverFrozenPids else { return rankedProcesses }
+        // Empty-frozen guard mirrors the capture-side rule in onHover —
+        // an empty order must never mask live data.
+        guard let frozen = hoverFrozenPids, !frozen.isEmpty else { return rankedProcesses }
         guard case .ok(let procs) = store.snapshot.processes else { return [] }
         var byPid: [Int32: ProcSample] = [:]
         byPid.reserveCapacity(procs.count)

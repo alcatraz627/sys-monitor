@@ -158,6 +158,29 @@ reproducing drill *before* its fix, and the drill stays in the suite.
   3.5(d) above, so it's fixed *within* v2 Phase 3, not post-v2. The
   partial pattern ("some values, most times") matches: it depends on how
   long before the switch the last idle tick fired.
+- **FB-3 — Hovering the process list pins it empty.** FIXED same day
+  (pending user retest). The panel opens under the cursor, so hover
+  begins while processes are still `.measuring` — the 1.2 hover fix
+  froze that *empty* pid order and rendered it for the whole hover; the
+  2.6 divisor widened the measuring window and the exposure. Fix: never
+  freeze an empty order (capture-side nil + display-side guard,
+  `PanelRootView.swift`). Process note: this was exactly the checklist
+  row left unchecked as "pending human check" — the human check worked,
+  but the *empty-capture* edge was missing from both the checklist edges
+  and the code review's hover analysis. Lesson absorbed into the
+  checklist style: edge lists must include "input is empty / in its
+  initial state at capture time", not just "input shrinks later".
+- **FB-4 — Settings changes (cadence, bar cells) blank NET/DISK.**
+  Same family as FB-2; folded into 3.5(d), whose scope is now ALL
+  transition ticks (tier switch, cadence change, sampler reconfigure):
+  lowering the cadence re-schedules the timer and the first tick tests
+  elapsed accumulated under the OLD cadence against the NEW cadence's
+  gap threshold → misclassified gap → rates blank one tick (5 s of `—`
+  at the slowest cadence). MEM never blanks because it's instantaneous
+  (no delta) — the asymmetry the report correctly flagged as a smell.
+  Secondary contributor: ADDING a bar cell legitimately re-baselines
+  that one metric (by design), but the blank shouldn't leak to metrics
+  whose configuration didn't change — the 3.5(d) drill must cover both.
 
 ## Verification protocol
 
