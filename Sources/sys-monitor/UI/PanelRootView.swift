@@ -125,9 +125,12 @@ struct PanelRootView: View {
                     .explain("Overall CPU load; sparkline shows the last 60 s on a fixed 0–100% scale")
                 Button(action: { panelState.isPinned.toggle() }) {
                     Image(systemName: panelState.isPinned ? "pin.fill" : "pin")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(panelState.isPinned ? Color.accentColor : Color.secondary.opacity(0.6))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(panelState.isPinned ? Color.accentColor : Color.secondary)
                         .rotationEffect(.degrees(45))
+                        .frame(width: 22, height: 18)
+                        .background(RoundedRectangle(cornerRadius: 4)
+                            .fill(Color.accentColor.opacity(panelState.isPinned ? 0.15 : 0)))
                 }
                 .buttonStyle(.plain)
                 .explain(panelState.isPinned
@@ -375,14 +378,24 @@ struct PanelRootView: View {
     }
 
     private var footer: some View {
-        HStack(spacing: DesignTokens.Space.m) {
-            Button("Settings…") { onShowSettings() }
-                .buttonStyle(.borderless)
+        HStack(spacing: DesignTokens.Space.s) {
+            footerButton("gearshape", help: "Settings") { onShowSettings() }
             Spacer()
-            Button("Quit") { NSApp.terminate(nil) }
-                .buttonStyle(.borderless)
+            footerButton("power", tint: .red, help: "Quit sys-monitor") { NSApp.terminate(nil) }
         }
-        .font(DesignTokens.numericFont(size: 11))
+    }
+
+    private func footerButton(_ icon: String, tint: Color = .secondary,
+                              help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(tint)
+                .frame(width: 26, height: 22)
+                .background(RoundedRectangle(cornerRadius: 5).fill(tint.opacity(0.10)))
+        }
+        .buttonStyle(.plain)
+        .explain(help)
     }
 
     private var divider: some View {
@@ -712,15 +725,28 @@ private struct ProcessList: View {
     }
 
     private var listView: some View {
-        LazyVStack(spacing: 0) {
+        LazyVStack(spacing: 1) {
             ForEach(ranked, id: \.pid) { p in
+                let expanded = expandedPids.contains(p.pid)
                 VStack(spacing: 0) {
                     rowView(for: p)
-                    if expandedPids.contains(p.pid) {
+                    if expanded {
                         ExpandedRow(pid: p.pid, path: pidPath[p.pid])
                             .transition(.opacity)
                     }
                 }
+                // Selected row + its detail panel read as ONE region: a
+                // single rounded card tinted above the list, with a hair
+                // outline. No internal divider — common region alone does
+                // the grouping, which keeps the noise down.
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.primary.opacity(expanded ? 0.05 : 0))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(Color.primary.opacity(expanded ? 0.10 : 0), lineWidth: 0.5)
+                )
             }
         }
     }
@@ -950,73 +976,115 @@ private struct ExpandedRow: View {
                     pathText
                 }
             }
-            HStack(spacing: 5) {
-                // Focus button only renders when macOS classifies the pid
-                // as a regular app (LSUIElement=false bundle). Daemons,
-                // CLI processes, and kernel tasks return nil here.
+            HStack(spacing: 6) {
+                // Icon-only, semantically tinted — the colour and glyph
+                // carry the meaning, the footer status line carries the
+                // words on hover (same idiom as the rest of the panel).
+                // Focus only for regular apps (daemons/CLI return nil).
                 if NSRunningApplication(processIdentifier: pid) != nil {
-                    focusButton(pid: pid)
-                }
-                // Real signals, two-step confirm. Severity tinting tells
-                // Terminate from Force Kill at a glance. On EPERM the
-                // action falls back to copying the shell command (the
-                // pre-v2 behavior) with an explanation.
-                killButton(label: "Terminate",  sig: SIGTERM, role: .warn)
-                killButton(label: "Force Kill", sig: SIGKILL, role: .destructive)
-                if let p = path {
-                    copyButton(label: "path", command: p, role: .neutral)
-                    Button(action: {
-                        NSWorkspace.shared.activateFileViewerSelecting(
-                            [URL(fileURLWithPath: p)]
-                        )
-                    }) {
-                        Image(systemName: "magnifyingglass.circle")
-                            .font(.system(size: 11))
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 3)
-                            .background(
-                                RoundedRectangle(cornerRadius: 3)
-                                    .fill(Color.secondary.opacity(0.18))
-                            )
+                    iconButton("arrow.up.forward.app", tint: .accentColor,
+                               help: "Bring this app to the front") {
+                        NSRunningApplication(processIdentifier: pid)?
+                            .activate(options: [.activateAllWindows])
                     }
-                    .buttonStyle(.plain)
-                    .explain("Reveal the executable in Finder")
+                }
+                // Two-step kill: first click arms (glyph fills + reddens),
+                // second within 3 s sends. EPERM falls back to copying the
+                // shell command. Fixed frames so arming never shifts a
+                // neighbour under the cursor.
+                killIconButton(sig: SIGTERM, armed: "stop.circle", fired: "stop.circle.fill",
+                               tint: .orange, help: "Terminate — ask to quit (SIGTERM)")
+                killIconButton(sig: SIGKILL, armed: "bolt.circle", fired: "bolt.circle.fill",
+                               tint: .red, help: "Force Kill — immediate (SIGKILL)")
+                if let p = path {
+                    iconButton("doc.on.doc", tint: .secondary, help: "Copy path") {
+                        let pb = NSPasteboard.general
+                        pb.clearContents(); pb.setString(p, forType: .string)
+                    }
+                    iconButton("magnifyingglass", tint: .secondary, help: "Reveal in Finder") {
+                        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)])
+                    }
                 }
                 Spacer()
             }
+            // Detail lines, each anchored by a leading glyph so the eye
+            // chunks them by kind (gestalt: a consistent leading edge of
+            // similar marks reads as a scannable column). Distinct gray
+            // levels separate the three kinds without adding colour noise.
             if let d = details {
-                Text(identityLine(d))
-                    .lineLimit(1)
-                    .font(DesignTokens.numericFont(size: 10))
-                    .foregroundStyle(.tertiary)
-                    .explain("Owner · threads · time alive · parent process")
+                detailLine("person", identityLine(d), tint: .secondary,
+                           help: "Owner · threads · time alive · parent process")
                 if let activity = activityLine(d) {
-                    Text(activity)
-                        .lineLimit(1)
-                        .font(DesignTokens.numericFont(size: 10))
-                        .foregroundStyle(.tertiary)
-                        .explain("Lifetime totals: CPU time burned and disk bytes read/written since launch")
+                    detailLine("gauge.medium", activity, tint: .secondary,
+                               help: "Lifetime totals: CPU time and disk bytes since launch")
                 }
             }
         }
         .padding(.leading, leadingIndent)
-        .padding(.vertical, 5)
+        .padding(.vertical, 6)
         .padding(.trailing, DesignTokens.Space.s)
         .task(id: pid) {
             details = ProcessIntrospection.details(for: pid)
         }
-        // Stronger contrast than secondary@0.06 so the expanded row reads
-        // as a contained sub-surface, not as a same-row continuation.
-        // Semantic recessed color, not hardcoded black — adapts to light
-        // mode where a black wash would read as a stain.
-        .background(
-            Color(nsColor: .underPageBackgroundColor).opacity(0.55)
-                .overlay(alignment: .top) {
-                    Rectangle()
-                        .fill(Color.secondary.opacity(0.30))
-                        .frame(height: 0.5)
+    }
+
+    /// One info line: a dim leading glyph + text. The glyph gives the
+    /// line a recognisable "kind" marker at a fixed left edge.
+    private func detailLine(_ icon: String, _ text: String, tint: Color, help: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+                .font(.system(size: 9))
+                .foregroundStyle(.tertiary)
+                .frame(width: 11)
+            Text(text)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .font(DesignTokens.numericFont(size: 10))
+                .foregroundStyle(tint)
+        }
+        .explain(help)
+    }
+
+    /// Square icon action button: tinted glyph, faint same-tint chip,
+    /// words deferred to the hover status line. No persistent text.
+    private func iconButton(_ icon: String, tint: Color, help: String,
+                            action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(tint)
+                .frame(width: 22, height: 20)
+                .background(RoundedRectangle(cornerRadius: 4).fill(tint.opacity(0.12)))
+        }
+        .buttonStyle(.plain)
+        .explain(help)
+    }
+
+    /// Kill variant with the two-step arm/fire interaction folded into
+    /// the glyph: idle shows the outline icon, armed shows the filled
+    /// icon on a stronger chip. Same fixed frame in both states.
+    private func killIconButton(sig: Int32, armed: String, fired: String,
+                                tint: Color, help: String) -> some View {
+        let confirming = confirmingSignal == sig
+        return Button(action: {
+            if confirming { confirmingSignal = nil; performKill(sig) }
+            else {
+                confirmingSignal = sig; killFeedback = nil
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                    if confirmingSignal == sig { confirmingSignal = nil }
                 }
-        )
+            }
+        }) {
+            Image(systemName: confirming ? fired : armed)
+                .font(.system(size: 12, weight: confirming ? .bold : .medium))
+                .foregroundStyle(confirming ? .white : tint)
+                .frame(width: 22, height: 20)
+                .background(RoundedRectangle(cornerRadius: 4)
+                    .fill(confirming ? tint.opacity(0.85) : tint.opacity(0.12)))
+        }
+        .buttonStyle(.plain)
+        .explain(confirming ? "Click again to confirm" : help)
     }
 
     /// Path rendered as two segments: directory (head-truncated) + basename
@@ -1048,51 +1116,13 @@ private struct ExpandedRow: View {
         }
     }
 
-    /// Two-step kill: first click arms ("really?"), second click within
-    /// 3 s sends the signal. The signal path never does blocking IPC on
-    /// the main thread — `kill(2)` is a plain syscall, and
-    /// `NSRunningApplication.terminate()` is used ONLY for `.regular`
-    /// apps (the polite quit-AppleEvent path); faceless system agents
-    /// get the raw signal. That restriction is the FB-1 lesson: AppKit
-    /// process IPC against non-activatable agents can hang the main
-    /// thread, and a frozen widget is worse than a blunt signal.
-    private func killButton(label: String, sig: Int32, role: ButtonRole) -> some View {
-        let confirming = confirmingSignal == sig
-        return Button(action: {
-            if confirming {
-                confirmingSignal = nil
-                performKill(sig)
-            } else {
-                confirmingSignal = sig
-                killFeedback = nil
-                Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 3_000_000_000)
-                    if confirmingSignal == sig { confirmingSignal = nil }
-                }
-            }
-        }) {
-            // Width fixed to the widest of the two states so the morph
-            // to "really?" never shifts the NEIGHBORING button under a
-            // stationary cursor — that geometry would turn a double-click
-            // into a misdirected destructive click.
-            ZStack {
-                Text(label).hidden()
-                Text("really?").hidden()
-                Text(confirming ? "really?" : label)
-            }
-            .font(DesignTokens.numericFont(size: 10))
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(
-                RoundedRectangle(cornerRadius: 3)
-                    .fill(confirming ? Color.red.opacity(0.35) : roleFill(role))
-            )
-        }
-        .buttonStyle(.plain)
-        .explain(sig == SIGTERM ? "Ask the process to quit (SIGTERM)"
-                             : "Force kill immediately (SIGKILL)")
-    }
-
+    /// The kill path never does blocking IPC on the main thread —
+    /// `kill(2)` is a plain syscall, and `NSRunningApplication.terminate()`
+    /// is used ONLY for `.regular` apps (the polite quit-AppleEvent path);
+    /// faceless system agents get the raw signal. That restriction is the
+    /// FB-1 lesson: AppKit process IPC against non-activatable agents can
+    /// hang the main thread, and a frozen widget is worse than a blunt
+    /// signal.
     private func performKill(_ sig: Int32) {
         // Pid-reuse guard: if the executable path changed since this row
         // was expanded, the pid was recycled — never signal a stranger.
@@ -1180,59 +1210,6 @@ private struct ExpandedRow: View {
         }
     }
 
-    enum ButtonRole { case neutral, warn, destructive }
-
-    private func copyButton(label: String, command: String, role: ButtonRole = .neutral) -> some View {
-        Button(action: {
-            let pb = NSPasteboard.general
-            pb.clearContents()
-            pb.setString(command, forType: .string)
-        }) {
-            Text(label)
-                .font(DesignTokens.numericFont(size: 10))
-                .padding(.horizontal, 7)
-                .padding(.vertical, 3)
-                .background(
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(roleFill(role))
-                )
-        }
-        .buttonStyle(.plain)
-        .explain("Copy to clipboard: \(command)")
-    }
-
-    private func roleFill(_ role: ButtonRole) -> Color {
-        switch role {
-        case .neutral:     return Color.secondary.opacity(0.18)
-        case .warn:        return Color.orange.opacity(0.20)
-        case .destructive: return Color.red.opacity(0.20)
-        }
-    }
-
-    private func focusButton(pid: Int32) -> some View {
-        Button(action: {
-            // Pid-based activation: NSRunningApplication looks up the
-            // process by pid and `activate` brings its windows forward.
-            // No-op if the process exits between render and click — fine.
-            NSRunningApplication(processIdentifier: pid)?
-                .activate(options: [.activateAllWindows])
-        }) {
-            HStack(spacing: 3) {
-                Image(systemName: "arrow.up.forward.app")
-                    .font(.system(size: 9))
-                Text("Focus")
-                    .font(DesignTokens.numericFont(size: 10))
-            }
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(
-                RoundedRectangle(cornerRadius: 3)
-                    .fill(Color.accentColor.opacity(0.22))
-            )
-        }
-        .buttonStyle(.plain)
-        .explain("Bring this app to the front")
-    }
 }
 
 // MARK: - Formatting helpers
