@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import os
 
 /// Drives the sampling loop and hands the result to the UI.
 ///
@@ -63,6 +64,12 @@ public final class SamplingCoordinator: @unchecked Sendable {
     private var generation: UInt64 = 0
     private var cpuHistory = RingBuffer(windowSeconds: 60)
     private var memHistory = RingBuffer(windowSeconds: 60)
+
+    /// Last memory-pressure level read from the kernel; refreshed once per
+    /// tick and passed into every memory sample.
+    private var currentPressure: MemoryPressure = .normal
+
+    private let log = Logger(subsystem: "dev.sys-monitor.menubar", category: "sampling")
 
     // MARK: - Init / lifecycle
 
@@ -158,6 +165,37 @@ public final class SamplingCoordinator: @unchecked Sendable {
         }
     }
 
+    // MARK: - Memory pressure (run only on `queue`)
+
+    /// Refresh the latched memory-pressure level from the kernel. Called
+    /// once per tick.
+    ///
+    /// Deliberately a sysctl poll, NOT `DispatchSource.makeMemoryPressureSource`:
+    /// the kernel delivers warn-level pressure *events* selectively — largest
+    /// memory consumers first, only as many processes as needed to relieve
+    /// pressure — so a small menu-bar app can sit through a whole warn episode
+    /// without ever receiving the event (observed under induced pressure: the
+    /// sysctl read 2 while the source stayed silent). The sysctl reports the
+    /// host-wide level unconditionally; one read per tick is microsecond-cheap.
+    private func refreshPressureLevel() {
+        var raw: Int32 = 0
+        var size = MemoryLayout<Int32>.size
+        guard sysctlbyname("kern.memorystatus_vm_pressure_level", &raw, &size, nil, 0) == 0 else {
+            return  // keep the last known level; next tick retries
+        }
+        // Kernel levels: 1 = normal, 2 = warning, 4 = critical.
+        let level: MemoryPressure
+        switch raw {
+        case 4:  level = .critical
+        case 2:  level = .warn
+        default: level = .normal
+        }
+        if level != currentPressure {
+            currentPressure = level
+            log.info("memory pressure -> \(String(describing: level), privacy: .public)")
+        }
+    }
+
     // MARK: - Tier transitions (run only on `queue`)
 
     private func transitionToIdle() {
@@ -235,6 +273,7 @@ public final class SamplingCoordinator: @unchecked Sendable {
         let elapsed = (prevTickTime > 0) ? (now - prevTickTime) : 0
         let isGap = (elapsed <= 0) || (elapsed > idleCadenceSeconds * gapMultiplier)
 
+        refreshPressureLevel()
         let cpuMetric  = readOverallCPU(now: now, isGap: isGap)
         let memMetric  = readMemory(now: now)
         let netMetric: Metric<Throughput> = idleSamplesNet
@@ -262,6 +301,7 @@ public final class SamplingCoordinator: @unchecked Sendable {
         let elapsed = (prevTickTime > 0) ? (now - prevTickTime) : 0
         let isGap = (elapsed <= 0) || (elapsed > openCadenceSeconds * gapMultiplier)
 
+        refreshPressureLevel()
         let cpuMetric  = readFullCPU(now: now, isGap: isGap)
         let memMetric  = readMemory(now: now)
         let netMetric  = readNet(now: now, elapsed: elapsed, isGap: isGap)
@@ -321,7 +361,7 @@ public final class SamplingCoordinator: @unchecked Sendable {
                 let frac = Double(raw.usedBytes) / Double(raw.physicalTotalBytes)
                 memHistory.append(HistoryPoint(timestamp: now, value: frac))
             }
-            return .ok(raw.toSample())
+            return .ok(raw.toSample(pressure: currentPressure))
         } catch {
             return .unavailable
         }
@@ -331,7 +371,13 @@ public final class SamplingCoordinator: @unchecked Sendable {
         now: TimeInterval, elapsed: TimeInterval, isGap: Bool
     ) -> Metric<Throughput> {
         let counters: NetCounters
-        do { counters = try netSampler.read() } catch { return .unavailable }
+        // A failed read must also drop the baseline: prevTickTime advances
+        // every tick, so a prev that survives an outage would delta N ticks
+        // of bytes over one tick's elapsed — an N× rate spike on recovery.
+        do { counters = try netSampler.read() } catch {
+            prevNet = nil
+            return .unavailable
+        }
         defer { prevNet = counters }
 
         guard let prev = prevNet, !isGap else { return .measuring }
@@ -348,7 +394,11 @@ public final class SamplingCoordinator: @unchecked Sendable {
         now: TimeInterval, elapsed: TimeInterval, isGap: Bool
     ) -> Metric<Throughput> {
         let counters: DiskCounters
-        do { counters = try diskSampler.read() } catch { return .unavailable }
+        // Same baseline-drop rule as readNet — see the comment there.
+        do { counters = try diskSampler.read() } catch {
+            prevDisk = nil
+            return .unavailable
+        }
         defer { prevDisk = counters }
 
         guard let prev = prevDisk, !isGap else { return .measuring }
@@ -363,7 +413,13 @@ public final class SamplingCoordinator: @unchecked Sendable {
         now: TimeInterval, elapsed: TimeInterval, isGap: Bool
     ) -> Metric<[ProcSample]> {
         let raws: [ProcRaw]
-        do { raws = try procSampler.read() } catch { return .unavailable }
+        // Per-process %CPU is Δcpu-time / Δwall — the same stale-baseline
+        // inflation as NET/DISK applies, so a failed enumeration drops the
+        // whole prev map and the next success re-baselines.
+        do { raws = try procSampler.read() } catch {
+            prevProcCpu.removeAll(keepingCapacity: true)
+            return .unavailable
+        }
 
         // Build the next prev-cpu-time map regardless, so the next tick can
         // delta even if this one returns `.measuring`.
@@ -419,8 +475,19 @@ public final class SamplingCoordinator: @unchecked Sendable {
             cpuHistory: cpuHistory,
             memHistory: memHistory
         )
-        Task { @MainActor [weak store] in
-            store?.snapshot = snap
+        // The hop is an unordered Task — under main-thread starvation two
+        // ticks' publishes can land out of order, so never let an older
+        // generation overwrite a newer one. The `>` is not wrap-safe, but
+        // a UInt64 tick counter cannot wrap on any real timescale
+        // (~585 billion years at 1 Hz); ordering protection matters,
+        // wrap does not.
+        Task { @MainActor [weak store, log] in
+            guard let store else { return }
+            guard snap.generation > store.snapshot.generation else {
+                log.debug("dropped out-of-order snapshot gen \(snap.generation) (store at \(store.snapshot.generation))")
+                return
+            }
+            store.snapshot = snap
         }
     }
 }

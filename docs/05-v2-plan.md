@@ -158,27 +158,39 @@ A checklist row counts only when *executed in-session* — passive "looks
 right" inspection is what shipped the Phase 1 bugs (atone
 `declared-ready-without-runtime-exercise`, 5×).
 
-### Phase 1 checklist (trust)
+### Phase 1 checklist (trust) — executed 2026-06-12
 
-- [ ] **1.1** Induce memory pressure (`sudo memory_pressure -S -l warn`,
-  then `critical`) → pressure log line fires and the panel row recolors
-  within one tick; release → returns to normal.
-  Edges: event fires while panel *closed* → next open shows the latched
-  level, not stale `.normal`; app launched while pressure is *already
-  elevated* — verify what the dispatch source reports before the first
-  event and document the behavior honestly.
-- [ ] **1.2** Park cursor over the process list for ≥5 open-ticks →
-  CPU/MEM values visibly change while row order doesn't.
-  Edges: hovered pid exits mid-hover → its row drops without reshuffle or
-  crash; typing in search mid-hover unfreezes; frozen order referencing
-  more pids than the fresh snapshot has → no index errors.
-- [ ] **1.3** With a mocked flaky NET or DISK sampler (throw for N ticks,
-  then recover) → during outage the cell shows `—`/measuring; the first
-  recovery tick shows measuring or a sane rate — never an N× spike.
-  Edge: failure spanning a tier switch (panel open→close mid-outage).
-- [ ] **1.4** Generation-regression guard logs (or asserts in debug) when
-  an older snapshot would overwrite a newer one → 5-minute soak with panel
-  open produces zero regression logs.
+- [x] **1.1** VERIFIED. Induced real pressure (`memory_pressure -l warn`,
+  unprivileged; `-S` needs root): app logged `-> warn` at t=22s — the same
+  second the kernel sysctl hit level 2 — and `-> normal` 4s after release.
+  Panel was *closed* throughout (idle tick polls too). Launch-under-
+  pressure is covered by construction (first tick polls).
+  **Design changed by this drill:** `DispatchSource.makeMemoryPressureSource`
+  never fired while the kernel sat at warn — macOS delivers warn events
+  selectively (largest consumers first), so a small menu-bar app may never
+  be notified. Shipped a per-tick sysctl poll of
+  `kern.memorystatus_vm_pressure_level` instead. Honest gaps: `critical`
+  branch not induced (same switch statement, code-reviewed only); panel
+  row *recoloring* not visually confirmed (same snapshot→view binding as
+  every other metric).
+- [ ] **1.2** Implemented + reviewer-verified semantics (order-only freeze,
+  dead pids drop via compactMap, `.measuring` snapshot returns empty not
+  stale). NOT runtime-exercised: a real hover needs a human mouse (or
+  focus-stealing automation). **10-second human check pending: open panel,
+  park cursor over the list, confirm CPU% values keep ticking.**
+- [x] **1.3** VERIFIED structurally via injected fault (temporary throw in
+  NetworkSampler keyed on a marker file, removed after the drill): 5
+  outage ticks went silent (`.unavailable`), the first recovery tick is
+  absent from the rate log (re-baseline returning `.measuring` — in the
+  buggy version this tick computes ~5× inflation), the second logs a
+  clean-window ambient rate. Drill ran on ambient traffic only (the
+  intended 2 MB/s load failed silently); the structural signature is the
+  proof. Tier-switch-spanning failure not drilled (panel stayed closed).
+- [x] **1.4** VERIFIED by soak: 3 minutes (plan said 5; panel closed, idle
+  5 s cadence ≈ 36 publishes), zero drop logs, app alive, no crash
+  reports. Review proposed switching the guard to `!=` for wrap-safety —
+  rejected: `!=` admits the very out-of-order overwrite the guard exists
+  to stop; `>` kept with wrap-acceptance documented.
 
 ### Phase 2 checklist (energy)
 

@@ -8,10 +8,12 @@ struct PanelRootView: View {
     @EnvironmentObject var store: MetricsStore
     @EnvironmentObject var settings: SettingsStore
     /// While the user is hovering over the process list, we freeze the
-    /// displayed ordering to whatever it was when the hover began. This
-    /// stops rows from re-sorting out from under a click or scroll. When
-    /// the hover ends, we drop back to the live ranking on the next tick.
-    @State private var hoverFrozenOrder: [ProcSample]?
+    /// displayed *ordering* to whatever it was when the hover began. This
+    /// stops rows from re-sorting out from under a click or scroll — but
+    /// only the order freezes: each row's CPU/MEM values keep updating
+    /// from the live snapshot, so a spike that starts mid-hover is still
+    /// visible. When the hover ends, we drop back to the live ranking.
+    @State private var hoverFrozenPids: [Int32]?
 
     /// Text the user has typed into the process search box. Filters the
     /// list by case-insensitive name containment.
@@ -174,9 +176,9 @@ struct PanelRootView: View {
             )
             .onHover { hovering in
                 if hovering {
-                    hoverFrozenOrder = rankedProcesses
+                    hoverFrozenPids = rankedProcesses.map(\.pid)
                 } else {
-                    hoverFrozenOrder = nil
+                    hoverFrozenPids = nil
                 }
             }
         }
@@ -187,7 +189,7 @@ struct PanelRootView: View {
             // Filter changes should be reflected immediately even if the
             // pointer is over the list — otherwise the user types into the
             // search box and nothing happens until they move away.
-            hoverFrozenOrder = nil
+            hoverFrozenPids = nil
         }
     }
 
@@ -255,9 +257,18 @@ struct PanelRootView: View {
     }
 
     /// What the process list actually shows: live ranking when not hovered;
-    /// the frozen snapshot taken at hover-begin while hovered.
+    /// while hovered, the pid order from hover-begin filled with FRESH
+    /// samples from the current snapshot. Pids that have exited simply
+    /// drop out (no reshuffle); pids that appeared after hover-begin —
+    /// or were below the display cap when it began — stay out until the
+    /// hover ends.
     private var displayedProcesses: [ProcSample] {
-        hoverFrozenOrder ?? rankedProcesses
+        guard let frozen = hoverFrozenPids else { return rankedProcesses }
+        guard case .ok(let procs) = store.snapshot.processes else { return [] }
+        var byPid: [Int32: ProcSample] = [:]
+        byPid.reserveCapacity(procs.count)
+        for p in procs { byPid[p.pid] = p }
+        return frozen.compactMap { byPid[$0] }
     }
 
     private var footer: some View {

@@ -7,9 +7,9 @@ import Darwin.Mach
 //   • sysctl(VM_SWAPUSAGE)              → xsw_usage (swap used in bytes)
 //
 // Memory pressure is NOT read by this sampler — the SamplingCoordinator
-// owns a `DispatchSource.makeMemoryPressureSource` (per the impl plan §5.3)
-// and latches the level into the snapshot. Phase 1's probe defaults to
-// `.normal` since the coordinator isn't built yet.
+// polls `kern.memorystatus_vm_pressure_level` once per tick (see
+// `refreshPressureLevel` and the rationale comment there) and passes the
+// latched level into `toSample(pressure:)`.
 
 public struct MemorySampler: Sampler {
     /// Physical RAM in bytes. Read once from `ProcessInfo.processInfo
@@ -63,15 +63,17 @@ public struct MemorySampler: Sampler {
 
 // Convert a `MemoryRaw` to a render-ready `MemorySample`. Lives here because
 // the conversion is metric-specific (which pages count as "used") rather
-// than a generic rate operation. Callers in later phases use this; the
-// Phase-1 probe prints raw numbers directly.
+// than a generic rate operation.
 public extension MemoryRaw {
     /// "Used" memory in the Activity-Monitor sense: active + wired +
     /// compressed. `free` is excluded (idle), and `inactive` is intentionally
     /// not surfaced (it's cache the kernel will reclaim under pressure).
     var usedBytes: UInt64 { activeBytes + wiredBytes + compressedBytes }
 
-    func toSample(pressure: MemoryPressure = .normal) -> MemorySample {
+    // No default for `pressure` — a silent `.normal` fallback is exactly
+    // how the panel shipped a hardcoded pressure value in v1. Callers
+    // must state where the level came from.
+    func toSample(pressure: MemoryPressure) -> MemorySample {
         MemorySample(
             usedBytes: usedBytes,
             totalBytes: physicalTotalBytes,
