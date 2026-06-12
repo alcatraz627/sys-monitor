@@ -111,12 +111,21 @@ actionable, cheap always-on):
   process-tick and delta against a prev-map, exactly like the cpu-time
   map — roughly +1 syscall per pid per 2 s, acceptable for the open
   tier. Then DISK joins the CPU|MEM sort control and the threshold
-  filter. **Per-process NETWORK I/O is NOT feasible** without private
-  frameworks: macOS offers no public per-pid network counters
-  (`nettop`/Activity Monitor use the private NetworkStatistics
-  framework). Honest options: skip it, or a coarse "this process has N
-  open sockets" count via `proc_pidinfo(PROC_PIDLISTFDS)` — presence,
-  not throughput.
+  filter. **Per-process NETWORK I/O: feasible via the private
+  NetworkStatistics framework** — the earlier "not feasible" verdict
+  was inconsistent with this project's own standard (4.2 already
+  embraces private IOReport behind an adapter). Probe evidence
+  (2026-06-12, `.claude/output/20260612-nstat-probe/`): the framework
+  dlopens, `NStatManagerCreate` works, and per-pid TCP/UDP sources
+  enumerate **with process names, without root**. Byte-counter
+  delivery (the counts-block wiring) is signature-sensitive on this
+  macOS and didn't yield in the timeboxed probe — the full spike needs
+  the version-conditional headers from existing open-source consumers
+  rather than guessed signatures. Slot as the NET twin of 4.2's
+  IOReport spike: same risk class, same adapter isolation, same
+  degrade-to-unavailable contract. Once counters flow, NET joins the
+  sort control and `>N:net` lands in the threshold filter exactly like
+  disk did.
 - **Battery / power cell**: battery %, charging state, and (Apple
   Silicon) watts via the public `IOPSCopyPowerSourcesInfo` — cheap,
   public API, huge glance value on MacBooks. Bar cell + panel row.
