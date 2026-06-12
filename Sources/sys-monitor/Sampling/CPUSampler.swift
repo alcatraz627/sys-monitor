@@ -24,6 +24,13 @@ public struct CPUSampler: Sampler {
         return CPUCounters(overall: overall, perCore: perCore)
     }
 
+    /// Overall ticks only — no `host_processor_info`, no kernel array
+    /// allocation. The idle tier uses this: it renders only the overall
+    /// gauge, so paying for per-core data every tick was pure waste.
+    public func readOverallTicks() throws -> CPUTicks {
+        try readOverall(host: mach_host_self())
+    }
+
     // MARK: - Overall
 
     private func readOverall(host: mach_port_t) throws -> CPUTicks {

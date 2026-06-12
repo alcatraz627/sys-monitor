@@ -37,6 +37,11 @@ public final class SamplingCoordinator: @unchecked Sendable {
     private let queue = DispatchQueue(label: "sys-monitor.sampling", qos: .utility)
     private enum Tier { case idle, open }
     private var activeTier: Tier = .idle
+    /// The tier the shell *asked for*, recorded even while transitions are
+    /// refused during display suspension. Resume restores this — not the
+    /// last achieved tier — so a panel opened while the display was dark
+    /// gets its open tier when the lights come back.
+    private var desiredTier: Tier = .idle
     private var idleTimer: DispatchSourceTimer?
     private var openTimer: DispatchSourceTimer?
 
@@ -54,12 +59,26 @@ public final class SamplingCoordinator: @unchecked Sendable {
     // Rate-metric prev state. Each one is "the last raw reading we saw,"
     // or nil if we haven't taken a baseline yet (or just dropped one due
     // to a gap or a tier switch into a tier where this metric exists).
-    private var prevCpu: CPUCounters?
+    private var prevOverall: CPUTicks?
     private var prevPerCore: [CPUTicks]?
     private var prevNet: NetCounters?
     private var prevDisk: DiskCounters?
     private var prevProcCpu: [Int32: UInt64] = [:]
     private var prevTickTime: TimeInterval = 0
+
+    // Process enumeration runs every 2nd open tick (it's the open tier's
+    // dominant cost, and a 2 s %CPU window is less noisy than 1 s anyway).
+    // Its rate math therefore needs its own elapsed clock — deltaing a
+    // 2-tick cpu-time difference over 1 tick's elapsed would double every
+    // value — and its own cached metric so skipped ticks re-publish the
+    // last list instead of flashing "measuring".
+    private var openTickIndex: UInt64 = 0
+    private var lastProcSampleTime: TimeInterval = 0
+    private var lastProcMetric: Metric<[ProcSample]> = .measuring
+
+    /// True while the display is asleep / screen locked — both timers are
+    /// cancelled and tier transitions are refused until resume.
+    private var displaySuspended = false
 
     private var generation: UInt64 = 0
     private var cpuHistory = RingBuffer(windowSeconds: 60)
@@ -86,7 +105,9 @@ public final class SamplingCoordinator: @unchecked Sendable {
     /// Start the sampler in idle tier. Idempotent.
     public func startIdleTier() {
         queue.async { [weak self] in
-            self?.transitionToIdle()
+            guard let self else { return }
+            self.desiredTier = .idle
+            self.transitionToIdle()
         }
     }
 
@@ -95,6 +116,7 @@ public final class SamplingCoordinator: @unchecked Sendable {
     public func enterOpenTier() {
         queue.async { [weak self] in
             guard let self else { return }
+            self.desiredTier = .open
             if self.activeTier == .open { return }
             self.transitionToOpen()
         }
@@ -104,6 +126,7 @@ public final class SamplingCoordinator: @unchecked Sendable {
     public func enterIdleTier() {
         queue.async { [weak self] in
             guard let self else { return }
+            self.desiredTier = .idle
             if self.activeTier == .idle { return }
             self.transitionToIdle()
         }
@@ -115,6 +138,40 @@ public final class SamplingCoordinator: @unchecked Sendable {
     public func reBaseline() {
         queue.async { [weak self] in
             self?.dropAllBaselines()
+        }
+    }
+
+    /// Stop sampling entirely while nobody can see the output (display
+    /// asleep or screen locked). System sleep suspends the timer queue for
+    /// free; a locked-but-awake Mac does not, so without this the widget
+    /// keeps paying full sampling + render cost into a black screen.
+    public func suspendForDisplaySleep() {
+        queue.async { [weak self] in
+            guard let self, !self.displaySuspended else { return }
+            self.displaySuspended = true
+            self.idleTimer?.cancel()
+            self.openTimer?.cancel()
+            self.idleTimer = nil
+            self.openTimer = nil
+            self.log.info("sampling suspended (display sleep / lock)")
+        }
+    }
+
+    /// Resume after the display wakes / unlocks, restoring whichever tier
+    /// the shell most recently asked for (a panel opened while the display
+    /// was dark had its open-tier request refused — honor it now).
+    /// Baselines are dropped so the first tick measures fresh instead of
+    /// deltaing across the dark gap.
+    public func resumeFromDisplaySleep() {
+        queue.async { [weak self] in
+            guard let self, self.displaySuspended else { return }
+            self.displaySuspended = false
+            self.dropAllBaselines()
+            switch self.desiredTier {
+            case .idle: self.transitionToIdle()
+            case .open: self.transitionToOpen()
+            }
+            self.log.info("sampling resumed (display wake / unlock)")
         }
     }
 
@@ -199,8 +256,12 @@ public final class SamplingCoordinator: @unchecked Sendable {
     // MARK: - Tier transitions (run only on `queue`)
 
     private func transitionToIdle() {
+        guard !displaySuspended else { return }
         openTimer?.cancel()
         openTimer = nil
+        openTickIndex = 0
+        lastProcSampleTime = 0
+        lastProcMetric = .measuring
         // Per-core and process state are open-tier only — drop them so a
         // stale value never gets reused. NET/DISK prevs ARE preserved:
         // if the user keeps those in the bar, the idle tier also samples
@@ -211,8 +272,14 @@ public final class SamplingCoordinator: @unchecked Sendable {
         prevPerCore = nil
         prevProcCpu.removeAll(keepingCapacity: true)
 
+        // Generous leeway on the idle tier: nothing about the glyph needs
+        // sub-second precision, and the rate math divides by measured
+        // elapsed, so accuracy is unaffected. Apple's floor is 10% of the
+        // interval; the wider window lets the kernel coalesce our wakeup
+        // with others.
         startTimer(
             cadence: idleCadenceSeconds,
+            leeway: max(0.05, idleCadenceSeconds * 0.1),
             assignTo: { [weak self] t in self?.idleTimer = t },
             handler: { [weak self] in self?.idleTick() }
         )
@@ -220,8 +287,12 @@ public final class SamplingCoordinator: @unchecked Sendable {
     }
 
     private func transitionToOpen() {
+        guard !displaySuspended else { return }
         idleTimer?.cancel()
         idleTimer = nil
+        openTickIndex = 0
+        lastProcSampleTime = 0
+        lastProcMetric = .measuring
         // Per-core/process are open-tier only and need fresh baselines.
         // NET/DISK prevs survive — if idle tier was sampling them, they
         // are fresh and the next open tick can emit a rate immediately.
@@ -230,8 +301,11 @@ public final class SamplingCoordinator: @unchecked Sendable {
         prevPerCore = nil
         prevProcCpu.removeAll(keepingCapacity: true)
 
+        // Open tier keeps a tight leeway — the panel is on screen and
+        // visual liveness is the point while it's open.
         startTimer(
             cadence: openCadenceSeconds,
+            leeway: 0.05,
             assignTo: { [weak self] t in self?.openTimer = t },
             handler: { [weak self] in self?.openTick() }
         )
@@ -240,6 +314,7 @@ public final class SamplingCoordinator: @unchecked Sendable {
 
     private func startTimer(
         cadence: Double,
+        leeway: Double,
         assignTo: (DispatchSourceTimer) -> Void,
         handler: @escaping () -> Void
     ) {
@@ -247,20 +322,23 @@ public final class SamplingCoordinator: @unchecked Sendable {
         t.schedule(
             deadline: .now() + .milliseconds(20),
             repeating: .milliseconds(Int(cadence * 1000.0)),
-            leeway: .milliseconds(50)
+            leeway: .milliseconds(Int(leeway * 1000.0))
         )
         t.setEventHandler(handler: handler)
         t.resume()
         assignTo(t)
+        log.info("timer scheduled cadence=\(cadence, privacy: .public)s leeway=\(Int(leeway * 1000), privacy: .public)ms")
     }
 
     private func dropAllBaselines() {
-        prevCpu = nil
+        prevOverall = nil
         prevPerCore = nil
         prevNet = nil
         prevDisk = nil
         prevProcCpu.removeAll(keepingCapacity: true)
         prevTickTime = 0
+        lastProcSampleTime = 0
+        lastProcMetric = .measuring
     }
 
     // MARK: - Ticks
@@ -306,13 +384,20 @@ public final class SamplingCoordinator: @unchecked Sendable {
         let memMetric  = readMemory(now: now)
         let netMetric  = readNet(now: now, elapsed: elapsed, isGap: isGap)
         let diskMetric = readDisk(now: now, elapsed: elapsed, isGap: isGap)
-        let procMetric = readProcesses(now: now, elapsed: elapsed, isGap: isGap)
+
+        // Process enumeration every 2nd tick — see the divisor comment on
+        // `openTickIndex`. Skipped ticks re-publish the last list so the
+        // panel doesn't flash.
+        openTickIndex &+= 1
+        if openTickIndex % 2 == 1 {
+            lastProcMetric = readProcesses(now: now)
+        }
 
         prevTickTime = now
         publishSnapshot(
             cpu: cpuMetric,
             memory: memMetric,
-            processes: procMetric,
+            processes: lastProcMetric,
             net: netMetric,
             disk: diskMetric
         )
@@ -321,12 +406,12 @@ public final class SamplingCoordinator: @unchecked Sendable {
     // MARK: - Per-metric reads (run only on `queue`)
 
     private func readOverallCPU(now: TimeInterval, isGap: Bool) -> Metric<CPUSample> {
-        let counters: CPUCounters
-        do { counters = try cpuSampler.read() } catch { return .unavailable }
-        defer { prevCpu = counters }
+        let ticks: CPUTicks
+        do { ticks = try cpuSampler.readOverallTicks() } catch { return .unavailable }
+        defer { prevOverall = ticks }
 
-        guard let prev = prevCpu, !isGap else { return .measuring }
-        let overall = RateMath.cpuUtilization(prev: prev.overall, now: counters.overall)
+        guard let prev = prevOverall, !isGap else { return .measuring }
+        let overall = RateMath.cpuUtilization(prev: prev, now: ticks)
         cpuHistory.append(HistoryPoint(timestamp: now, value: overall))
         return .ok(CPUSample(overall: overall, perCore: []))
     }
@@ -335,12 +420,12 @@ public final class SamplingCoordinator: @unchecked Sendable {
         let counters: CPUCounters
         do { counters = try cpuSampler.read() } catch { return .unavailable }
         defer {
-            prevCpu = counters
+            prevOverall = counters.overall
             prevPerCore = counters.perCore
         }
 
-        guard let prev = prevCpu, !isGap else { return .measuring }
-        let overall = RateMath.cpuUtilization(prev: prev.overall, now: counters.overall)
+        guard let prev = prevOverall, !isGap else { return .measuring }
+        let overall = RateMath.cpuUtilization(prev: prev, now: counters.overall)
         cpuHistory.append(HistoryPoint(timestamp: now, value: overall))
 
         // Per-core needs its own prev because we may have just entered the
@@ -409,17 +494,24 @@ public final class SamplingCoordinator: @unchecked Sendable {
         return .ok(Throughput(inPerSec: rBps, outPerSec: wBps))
     }
 
-    private func readProcesses(
-        now: TimeInterval, elapsed: TimeInterval, isGap: Bool
-    ) -> Metric<[ProcSample]> {
+    private func readProcesses(now: TimeInterval) -> Metric<[ProcSample]> {
+        // Runs on its own divisor, so it keeps its own elapsed clock —
+        // the shared per-tick `elapsed` would halve the window and double
+        // every %CPU value.
+        let elapsed = (lastProcSampleTime > 0) ? (now - lastProcSampleTime) : 0
+        let sampleInterval = openCadenceSeconds * 2
+        let isGap = (elapsed <= 0) || (elapsed > sampleInterval * gapMultiplier)
+
         let raws: [ProcRaw]
         // Per-process %CPU is Δcpu-time / Δwall — the same stale-baseline
         // inflation as NET/DISK applies, so a failed enumeration drops the
         // whole prev map and the next success re-baselines.
         do { raws = try procSampler.read() } catch {
             prevProcCpu.removeAll(keepingCapacity: true)
+            lastProcSampleTime = 0
             return .unavailable
         }
+        lastProcSampleTime = now
 
         // Build the next prev-cpu-time map regardless, so the next tick can
         // delta even if this one returns `.measuring`.

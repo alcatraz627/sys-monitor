@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import os
 
 /// Owns the dropdown panel and the click-outside event monitor.
 ///
@@ -17,6 +18,9 @@ final class PanelController {
     private weak var statusItem: NSStatusItem?
     private var panel: DropPanel?
     private var clickMonitor: Any?
+    private var occlusionObserver: NSObjectProtocol?
+    private var spaceObserver: NSObjectProtocol?
+    private let log = Logger(subsystem: "dev.sys-monitor.menubar", category: "panel")
 
     /// Set after construction by the AppDelegate so the panel's "Settings…"
     /// footer button has somewhere to dispatch. Captured weakly inside the
@@ -34,6 +38,7 @@ final class PanelController {
     /// opens.
     func close() {
         removeClickMonitor()
+        removeVisibilityObservers()
         panel?.orderOut(nil)
         coordinator.enterIdleTier()
     }
@@ -59,6 +64,48 @@ final class PanelController {
         panel.makeKeyAndOrderFront(nil)
         coordinator.enterOpenTier()
         installClickMonitor()
+        installVisibilityObservers(panel: panel)
+    }
+
+    // MARK: - Visibility-driven dismiss
+
+    /// Close when the panel stops being visible without a click: a Space
+    /// switch, Mission Control, or anything that occludes it. The panel is
+    /// dismissed (not kept marooned on the old Space) and the open tier —
+    /// the expensive one — ends with it. Without this, a keyboard Space
+    /// switch left full process enumeration running until the next click
+    /// anywhere happened to reach the global monitor.
+    private func installVisibilityObservers(panel: DropPanel) {
+        removeVisibilityObservers()
+        occlusionObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didChangeOcclusionStateNotification,
+            object: panel, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, let p = self.panel else { return }
+                if p.isVisible && !p.occlusionState.contains(.visible) {
+                    self.log.info("panel occluded -> closing (demote to idle tier)")
+                    self.close()
+                }
+            }
+        }
+        spaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.activeSpaceDidChangeNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.isVisible else { return }
+                self.log.info("active Space changed -> closing panel")
+                self.close()
+            }
+        }
+    }
+
+    private func removeVisibilityObservers() {
+        if let o = occlusionObserver { NotificationCenter.default.removeObserver(o) }
+        if let o = spaceObserver { NSWorkspace.shared.notificationCenter.removeObserver(o) }
+        occlusionObserver = nil
+        spaceObserver = nil
     }
 
 

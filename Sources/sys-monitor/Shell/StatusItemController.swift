@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import os
 
 /// Owns the menu-bar `NSStatusItem`, keeps its image in sync with the
 /// `MetricsStore`, and routes the button's click to a supplied handler
@@ -14,6 +15,18 @@ final class StatusItemController {
     private var renderer: GlyphRenderer
     private var subscription: AnyCancellable?
     private var clickTarget: ClickTarget?
+
+    /// Key of the last frame actually drawn — when the next snapshot
+    /// would draw the same pixels, skip the NSImage rebuild entirely.
+    private var lastRenderKey: String?
+
+    /// On notched Macs the system can silently hide a status item that
+    /// doesn't fit the menu bar. Rendering into that void is wasted work,
+    /// so rendering pauses while the status window reports itself
+    /// occluded. (Sampling continues — the panel must still work.)
+    private var glyphOnScreen = true
+
+    private let log = Logger(subsystem: "dev.sys-monitor.menubar", category: "glyph")
 
     init(
         store: MetricsStore,
@@ -51,11 +64,41 @@ final class StatusItemController {
     /// redraws against the current snapshot.
     func updateCells(_ cells: [BarCell], activityArrows: Bool) {
         renderer = GlyphRenderer(cells: cells, activityArrows: activityArrows)
+        lastRenderKey = nil
         redraw(snapshot: store.snapshot)
     }
 
     private func redraw(snapshot: MetricsSnapshot) {
         guard let button = statusItem.button else { return }
+
+        // Skip drawing while the status window reports itself occluded
+        // (hidden by menu-bar overflow on notched Macs, etc.).
+        // `occlusionState` is the AppKit-native signal; the classic
+        // CGWindowList technique is unusable for status items on modern
+        // macOS — the window is absent from even the app's own on-screen
+        // list query, and `windowNumber` reads as 2^32. A nil window
+        // (first paint, before AppKit materializes it) counts as visible
+        // so the initial frame always lands.
+        let occluded = button.window.map { !$0.occlusionState.contains(.visible) } ?? false
+        if occluded {
+            if glyphOnScreen {
+                glyphOnScreen = false
+                log.info("status item occluded — pausing glyph renders")
+            }
+            return
+        }
+        if !glyphOnScreen {
+            glyphOnScreen = true
+            lastRenderKey = nil      // force a fresh frame on return
+            log.info("status item visible again — resuming renders")
+        }
+
+        let key = renderer.renderKey(snapshot: snapshot)
+        if key == lastRenderKey {
+            log.debug("render skipped (identical frame)")
+            return
+        }
+        lastRenderKey = key
         button.image = renderer.render(snapshot: snapshot)
         button.setAccessibilityValue(renderer.accessibilityValue(snapshot: snapshot))
     }

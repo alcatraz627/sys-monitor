@@ -57,6 +57,50 @@ public struct GlyphRenderer {
         self.valueFont = vFont
         self.arrowFont = aFont
         self.arrowW    = Self.measure("↓", font: aFont)
+        // Constant per renderer instance (fonts are fixed at init) — the
+        // M/G/K letters aren't digit-monospaced, so take the max across
+        // units once instead of re-measuring two strings every tick.
+        self.throughputValueReservedW = max(
+            Self.measure("999MB", font: vFont),
+            Self.measure("999GB", font: vFont)
+        )
+    }
+
+    /// Cheap identity of what `render` would draw for this snapshot. Two
+    /// snapshots with equal keys produce visually identical glyphs, so the
+    /// caller can skip the NSImage rebuild. Quantization (bar fill and
+    /// arrow activity to 1/32) deliberately treats imperceptible
+    /// differences as equal; severity is included explicitly because its
+    /// thresholds don't align with bucket edges.
+    public func renderKey(snapshot: MetricsSnapshot) -> String {
+        func state<T>(_ m: Metric<T>) -> String {
+            switch m {
+            case .ok: return "o"
+            case .measuring: return "m"
+            case .unavailable: return "u"
+            }
+        }
+        var parts: [String] = []
+        parts.reserveCapacity(cells.count)
+        for cell in cells {
+            switch cell {
+            case .cpu:
+                let load = Self.cpuLoad(snapshot)
+                let sev = Self.severity(load: load, warn: 0.60, critical: 0.85)
+                parts.append("c\(state(snapshot.cpu))\(Self.cpuPercentText(snapshot))|\(Int(load * 32))|\(sev)")
+            case .mem:
+                let load = Self.memLoad(snapshot)
+                let sev = Self.severity(load: load, warn: 0.75, critical: 0.92)
+                parts.append("m\(state(snapshot.memory))\(Self.memPercentText(snapshot))|\(Int(load * 32))|\(sev)")
+            case .net:
+                let d = Self.netDownBps(snapshot), u = Self.netUpBps(snapshot)
+                parts.append("n\(state(snapshot.net))\(Self.formatBps(d))|\(Self.formatBps(u))|\(Int(Self.activityFrac(bps: d) * 32))|\(Int(Self.activityFrac(bps: u) * 32))")
+            case .disk:
+                let r = Self.diskReadBps(snapshot), w = Self.diskWriteBps(snapshot)
+                parts.append("d\(state(snapshot.disk))\(Self.formatBps(r))|\(Self.formatBps(w))|\(Int(Self.activityFrac(bps: r) * 32))|\(Int(Self.activityFrac(bps: w) * 32))")
+            }
+        }
+        return parts.joined(separator: ";")
     }
 
     public func render(snapshot: MetricsSnapshot) -> NSImage {
@@ -120,22 +164,20 @@ public struct GlyphRenderer {
     }
 
     private func throughputCellWidth(downText: String, upText: String) -> CGFloat {
-        // Values are always 5 monospaced chars, so both sub-groups are
-        // the same width by construction — no per-tick `max(down, up)`
-        // call needed. Width is structurally fixed.
+        // `throughputValueReservedW` is the maximum width any formatBps
+        // string can produce (measured once at init), so both columns use
+        // the same reserved cap — no per-tick `max(down, up)` needed.
+        // (Strings are NOT equal-width by construction: "." and the unit
+        // letters aren't digit-monospaced; the reservation is what fixes
+        // the width.)
         let valueW = throughputValueReservedW
         let halfW = arrowW + Self.arrowValGap + valueW
         return Self.iconPt + Self.elementGap + halfW + Self.elementGap + halfW
     }
 
     /// 5-char reserved width — wide enough for every value `formatBps`
-    /// can produce. `monospacedDigitSystemFont` guarantees digit
-    /// monospace but not letter monospace, so the M/G/K suffixes can
-    /// differ in width; take the max across units.
-    private var throughputValueReservedW: CGFloat {
-        max(Self.measure("999MB", font: valueFont),
-            Self.measure("999GB", font: valueFont))
-    }
+    /// can produce. Measured once at init; see the init comment.
+    private let throughputValueReservedW: CGFloat
 
     public func accessibilityValue(snapshot: MetricsSnapshot) -> String {
         cells.map { Self.accessibilityFor(cell: $0, snapshot: snapshot) }
@@ -256,14 +298,7 @@ public struct GlyphRenderer {
     /// the desaturation is a deliberate band, not a continuous slide.
     private static func arrowColor(_ base: NSColor, bps: Double, activity: Bool) -> NSColor {
         guard activity else { return base }
-        let frac: CGFloat
-        if bps < 100 {
-            frac = 0
-        } else {
-            let maxLog = log10(10.0 * 1_048_576.0)             // ≈ 7.02
-            let bpsLog = log10(max(bps, 100))
-            frac = max(0, min(1, CGFloat(bpsLog / maxLog)))
-        }
+        let frac = activityFrac(bps: bps)
         let alpha = 0.30 + 0.70 * frac
         // 4-bucket saturation: 0.10 / 0.40 / 0.70 / 1.00. The idle bucket
         // sits at 10% saturation, not 0, so the green/red hue is barely
@@ -276,6 +311,15 @@ public struct GlyphRenderer {
         var h: CGFloat = 0, s: CGFloat = 0, v: CGFloat = 0, a: CGFloat = 0
         sRGB.getHue(&h, saturation: &s, brightness: &v, alpha: &a)
         return NSColor(hue: h, saturation: s * sScale, brightness: v, alpha: alpha)
+    }
+
+    /// Log-scale activity fraction (0…1) shared by the arrow color and
+    /// the render key, so the key's buckets track the drawn output.
+    private static func activityFrac(bps: Double) -> CGFloat {
+        guard bps >= 100 else { return 0 }
+        let maxLog = log10(10.0 * 1_048_576.0)             // ≈ 7.02
+        let bpsLog = log10(max(bps, 100))
+        return max(0, min(1, CGFloat(bpsLog / maxLog)))
     }
 
     // MARK: - Drawing primitives

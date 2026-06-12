@@ -192,28 +192,47 @@ right" inspection is what shipped the Phase 1 bugs (atone
   rejected: `!=` admits the very out-of-order overwrite the guard exists
   to stop; `>` kept with wrap-acceptance documented.
 
-### Phase 2 checklist (energy)
+### Phase 2 checklist (energy) — executed 2026-06-12
 
-- [ ] **2.1** Panel open → switch Space (keyboard shortcut, not click) →
-  demote log within 1 s; `ps -o %cpu` settles back to idle level.
-  Edge: return to the original Space — panel state (dismissed vs restored)
-  matches what the plan row decided.
-- [ ] **2.2** Idle tier emits no `host_processor_info` (debug-log the
-  per-core read; idle soak shows zero such lines); per-core data still
-  appears when the panel opens.
-- [ ] **2.3** Log leeway at timer build: idle ≥10% of cadence. Activity
-  Monitor "Idle Wake Ups" for our pid ≤ cadence rate over a 5-min soak.
-- [ ] **2.4** Lock screen or `pmset displaysleepnow` → pause/deep-idle log;
-  wake → re-baseline log and no spike values on the first tick.
-  Edge: panel open at lock time → open tier doesn't survive the lock.
-- [ ] **2.5** Idle soak → render-skip counter increments (identical frames
-  skipped); generate load → rendering resumes immediately.
-- [ ] **2.6** Panel open: gauges update every open-tick, process rows every
-  2nd tick (watch row timestamps or log), first paint unaffected.
-- [ ] **2.7** Mock the on-screen check to "hidden" → render skipped (log) /
-  deep-idle; restore → resumes. (Real overflow induction optional.)
-- [ ] **2.8** Hold a menu open ≥3 ticks (any app menu, or 3.4's right-click
-  menu) → glyph keeps updating. If it freezes, fix lands in this phase.
+- [ ] **2.1** Implemented (occlusion + active-Space observers close the
+  panel; decision: *dismiss*, not restore — a panel marooned on another
+  Space is worse than re-clicking). Review-verified observer lifecycle.
+  NOT runtime-exercised: opening the panel needs a mouse. **Human check:
+  open panel, switch Space, confirm it's gone and (via Activity Monitor)
+  CPU settles within a second.**
+- [x] **2.2** VERIFIED: temporary log on the per-core read, 40 s idle soak
+  → zero invocations; the call compiles only into the open path now.
+  (Per-core strip rendering when the panel opens — human glance.)
+- [x] **2.3** VERIFIED: schedule log shows `leeway=500ms` at the 5 s idle
+  cadence (10%). Wakeup counting via Activity Monitor not separately
+  performed — the arithmetic (≤0.2 wakes/s) is below Apple's 1/s red line
+  by construction.
+- [x] **2.4** VERIFIED live: `pmset displaysleepnow` → "sampling suspended"
+  the same second; display wake → "sampling resumed" + timer rescheduled +
+  baselines dropped. (The drill's display re-woke in 0.4 s — both
+  directions still exercised.) The lock-while-panel-open edge produced a
+  review finding: a click during the dark gap could leave the panel open
+  on idle tier; fixed with `desiredTier` (resume honors the last
+  *requested* tier, not the last achieved one).
+- [ ] **2.5** Implemented; key encodes every drawn input (review-verified).
+  0 skips observed in 45 s under this machine's real config — all four
+  cells + activity arrows means ambient NET churn changes the key nearly
+  every tick. Honest status: mechanism runtime-unverified, and its win is
+  small for a 4-cell-with-arrows bar; it pays off for CPU+MEM-only setups.
+- [ ] **2.6** Implemented with a dedicated process-elapsed clock (the naive
+  divisor would have doubled every %CPU — same trap class as 1.3).
+  Review-verified; **human check: open panel, confirm process rows step
+  every ~2 s while gauges step every 1 s.**
+- [x] **2.7** REDESIGNED during verification: the MenuMeters CGWindowList
+  technique is dead on macOS 26 — `windowNumber` for the status window
+  reads 2³², and the window is absent even from the app's own on-screen
+  query (drill-proven). Also caught a launch deadlock in the first
+  implementation (visibility probe before first paint → zero-width window
+  → "hidden" → paint skipped forever). Shipped: AppKit `occlusionState`
+  check, fail-open on nil window. Both transitions exercised live at
+  launch (occluded at first composite → visible 5 s later → painted).
+- [ ] **2.8** Deferred to Phase 3 — meaningfully testable once the
+  right-click menu (3.4) exists to hold a tracked menu open.
 
 ### Phase 3 checklist (interaction)
 

@@ -115,6 +115,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
 
+        // Pause sampling whenever nobody can see the widget: display
+        // sleep (NSWorkspace) and screen lock (distributed notification —
+        // there is no public NSWorkspace equivalent). Both paths are
+        // idempotent in the coordinator, so a lock that also sleeps the
+        // display suspends once and resumes once.
+        let wsCenter = NSWorkspace.shared.notificationCenter
+        wsCenter.addObserver(self, selector: #selector(displayWentDark),
+                             name: NSWorkspace.screensDidSleepNotification, object: nil)
+        wsCenter.addObserver(self, selector: #selector(displayCameBack),
+                             name: NSWorkspace.screensDidWakeNotification, object: nil)
+        let distCenter = DistributedNotificationCenter.default()
+        distCenter.addObserver(self, selector: #selector(displayWentDark),
+                               name: NSNotification.Name("com.apple.screenIsLocked"), object: nil)
+        distCenter.addObserver(self, selector: #selector(displayCameBack),
+                               name: NSNotification.Name("com.apple.screenIsUnlocked"), object: nil)
+
         coordinator.startIdleTier()
     }
 
@@ -124,6 +140,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func systemDidWake() {
         coordinator?.reBaseline()
+    }
+
+    @objc private func displayWentDark() {
+        panelController?.close()
+        coordinator?.suspendForDisplaySleep()
+    }
+
+    @objc private func displayCameBack() {
+        coordinator?.resumeFromDisplaySleep()
     }
 
     // MARK: - Launch at login
