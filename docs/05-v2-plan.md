@@ -137,6 +137,118 @@ revert; wake-from-sleep re-baseline.
   by design, which is exactly what makes 4.2 (private IOReport) available
   to us at all.
 
+## Verification protocol
+
+Each phase lands only after its checklist below passes, in this order:
+
+- **V1 Concept review** — before coding, re-read the item's rationale
+  against current evidence (the cited lines, the audit reports). If the
+  design no longer holds, amend the plan first.
+- **V2 Concept vs implementation** — after coding, walk every claim the
+  change makes (comments, docs, plan rows) and point at the file:line
+  implementing it. A promised symbol with no caller fails this gate.
+- **V3 Runtime & edge drill** — run the app and watch logs/behavior.
+  Induce the driving states; where real conditions are hard to trigger,
+  mock the data feed (debug env hooks or a temporary injected fault are
+  fine — remove before commit unless promoted to a `--sim-*` flag).
+- **V4 Code review** — fresh-lens skeptical review of the full phase
+  diff, confidence floor 80.
+
+A checklist row counts only when *executed in-session* — passive "looks
+right" inspection is what shipped the Phase 1 bugs (atone
+`declared-ready-without-runtime-exercise`, 5×).
+
+### Phase 1 checklist (trust)
+
+- [ ] **1.1** Induce memory pressure (`sudo memory_pressure -S -l warn`,
+  then `critical`) → pressure log line fires and the panel row recolors
+  within one tick; release → returns to normal.
+  Edges: event fires while panel *closed* → next open shows the latched
+  level, not stale `.normal`; app launched while pressure is *already
+  elevated* — verify what the dispatch source reports before the first
+  event and document the behavior honestly.
+- [ ] **1.2** Park cursor over the process list for ≥5 open-ticks →
+  CPU/MEM values visibly change while row order doesn't.
+  Edges: hovered pid exits mid-hover → its row drops without reshuffle or
+  crash; typing in search mid-hover unfreezes; frozen order referencing
+  more pids than the fresh snapshot has → no index errors.
+- [ ] **1.3** With a mocked flaky NET or DISK sampler (throw for N ticks,
+  then recover) → during outage the cell shows `—`/measuring; the first
+  recovery tick shows measuring or a sane rate — never an N× spike.
+  Edge: failure spanning a tier switch (panel open→close mid-outage).
+- [ ] **1.4** Generation-regression guard logs (or asserts in debug) when
+  an older snapshot would overwrite a newer one → 5-minute soak with panel
+  open produces zero regression logs.
+
+### Phase 2 checklist (energy)
+
+- [ ] **2.1** Panel open → switch Space (keyboard shortcut, not click) →
+  demote log within 1 s; `ps -o %cpu` settles back to idle level.
+  Edge: return to the original Space — panel state (dismissed vs restored)
+  matches what the plan row decided.
+- [ ] **2.2** Idle tier emits no `host_processor_info` (debug-log the
+  per-core read; idle soak shows zero such lines); per-core data still
+  appears when the panel opens.
+- [ ] **2.3** Log leeway at timer build: idle ≥10% of cadence. Activity
+  Monitor "Idle Wake Ups" for our pid ≤ cadence rate over a 5-min soak.
+- [ ] **2.4** Lock screen or `pmset displaysleepnow` → pause/deep-idle log;
+  wake → re-baseline log and no spike values on the first tick.
+  Edge: panel open at lock time → open tier doesn't survive the lock.
+- [ ] **2.5** Idle soak → render-skip counter increments (identical frames
+  skipped); generate load → rendering resumes immediately.
+- [ ] **2.6** Panel open: gauges update every open-tick, process rows every
+  2nd tick (watch row timestamps or log), first paint unaffected.
+- [ ] **2.7** Mock the on-screen check to "hidden" → render skipped (log) /
+  deep-idle; restore → resumes. (Real overflow induction optional.)
+- [ ] **2.8** Hold a menu open ≥3 ticks (any app menu, or 3.4's right-click
+  menu) → glyph keeps updating. If it freezes, fix lands in this phase.
+
+### Phase 3 checklist (interaction)
+
+- [ ] **3.1** Spawn a disposable `sleep 999`; Terminate from the panel →
+  process exits via SIGTERM; spawn again, Force Kill → SIGKILL.
+  Edges: kill a root-owned pid → `EPERM` falls back to copy-command with
+  explanation; confirm-step resets after timeout/cursor-leave; pid gone
+  between click and confirm → no signal sent to a reused pid (re-verify
+  identity before `kill`).
+- [ ] **3.2** Esc closes the panel when it has key focus.
+  Edge: Esc with the search field focused — decide (clear-then-close vs
+  close) and verify the decided behavior.
+- [ ] **3.3** Status item within ~180 pt of the right screen edge (drag it,
+  or smallest display) → panel fully on-screen. Edge: multi-display
+  boundary placement.
+- [ ] **3.4** Right-click → menu (Settings…, Quit) works; left-click still
+  toggles the panel; menu dismisses cleanly.
+- [ ] **3.5** Stopwatch (log timestamps): click → gauges populated from
+  cached idle sample in <100 ms; process list populated ≈300 ms.
+  Edges: first-ever open with no cached sample → clean measuring state;
+  reopen after a gap longer than threshold → baseline NOT reused.
+- [ ] **3.6** A long-named helper (e.g. "Code Helper (Renderer)") shows its
+  full name and is findable via search by that name. Edge: process whose
+  path lookup fails keeps the `proc_name` fallback.
+
+### Phase 4 checklist (capability)
+
+- [ ] **4.1** `curl` a large file + `dd` a temp file → NET/DISK sparklines
+  show the spike with correct timing; disable the cells → rings still fill
+  on the slow divisor; gaps (if any) render as gaps, not interpolation.
+- [ ] **4.2** IOReport readings cross-checked against a one-shot
+  `sudo powermetrics` sample within reasonable tolerance; mock unknown
+  channel names → adapter degrades to `unavailable`, app keeps running.
+- [ ] **4.3** Under load: visible rows + unaccounted ≈ overall CPU within a
+  few percent.
+- [ ] **4.4** Self-cost row matches `ps -o %cpu` for our pid (±0.5%); idle
+  reads <1%, open-tier <1.4%.
+
+### Phase 5 checklist (hygiene)
+
+- [ ] `swift test` executes the RateMath boundary table locally — including
+  a `UInt32` tick-wrap case that reproduces the `0de4eae` crash class.
+- [ ] rg-sweep: zero comments/docs promising a symbol that doesn't exist
+  (re-check all seven §8 drift items from the audit).
+- [ ] Dead-code removal compiles clean; CoreStrip cap decision recorded in
+  docs.
+
 ## Sequencing
 
 ```
