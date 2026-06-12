@@ -22,6 +22,40 @@ enum ProcessIntrospection {
         return String(cString: buffer)
     }
 
+    /// One-shot biography of a process for the expanded detail row:
+    /// owner, thread count, launch time, parent pid. Each field is
+    /// best-effort independently — a denied lookup leaves that field nil
+    /// rather than failing the whole struct.
+    struct Details {
+        let userName: String?
+        let threadCount: Int?
+        let startDate: Date?
+        let parentPid: Int32?
+    }
+
+    static func details(for pid: Int32) -> Details {
+        var bsd = proc_bsdinfo()
+        let bsdSize = Int32(MemoryLayout<proc_bsdinfo>.size)
+        let gotBsd = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &bsd, bsdSize) == bsdSize
+
+        var task = proc_taskinfo()
+        let taskSize = Int32(MemoryLayout<proc_taskinfo>.size)
+        let gotTask = proc_pidinfo(pid, PROC_PIDTASKINFO, 0, &task, taskSize) == taskSize
+
+        var user: String?
+        if gotBsd, let pw = getpwuid(bsd.pbi_uid) {
+            user = String(cString: pw.pointee.pw_name)
+        }
+        return Details(
+            userName: user,
+            threadCount: gotTask ? Int(task.pti_threadnum) : nil,
+            startDate: gotBsd && bsd.pbi_start_tvsec > 0
+                ? Date(timeIntervalSince1970: TimeInterval(bsd.pbi_start_tvsec))
+                : nil,
+            parentPid: gotBsd ? Int32(bsd.pbi_ppid) : nil
+        )
+    }
+
     /// Best-effort app icon for an executable path. Walks up looking for
     /// the enclosing `.app` bundle and returns that bundle's icon. Returns
     /// nil for raw daemons / CLI binaries / kernel processes — we

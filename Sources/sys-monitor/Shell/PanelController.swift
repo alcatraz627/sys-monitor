@@ -2,6 +2,19 @@ import AppKit
 import SwiftUI
 import os
 
+/// Shared panel-session state the SwiftUI content can both read and
+/// mutate. Pinning lives here rather than in SettingsStore because it's
+/// a session gesture, not a persisted preference — it resets when the
+/// panel is explicitly closed.
+@MainActor
+final class PanelState: ObservableObject {
+    /// While pinned, the panel ignores click-outside, Escape, and
+    /// Space-change dismissal — only the menu-bar icon (or unpinning)
+    /// closes it. Occlusion demotes the sampling tier instead of
+    /// dismissing, and screen lock still closes unconditionally.
+    @Published var isPinned = false
+}
+
 /// Owns the dropdown panel and the click-outside event monitor.
 ///
 /// Click handler (`toggle`) is wired by the status-item controller's button
@@ -20,6 +33,9 @@ final class PanelController {
     private var clickMonitor: Any?
     private var occlusionObserver: NSObjectProtocol?
     private var spaceObserver: NSObjectProtocol?
+    private var resizeObserver: NSObjectProtocol?
+    let panelState = PanelState()
+    private var isPinned: Bool { panelState.isPinned }
     private let log = Logger(subsystem: "dev.sys-monitor.menubar", category: "panel")
 
     /// Set after construction by the AppDelegate so the panel's "Settings…"
@@ -37,6 +53,7 @@ final class PanelController {
     /// flow so the dropdown gets out of the way before the settings window
     /// opens.
     func close() {
+        panelState.isPinned = false   // pin is a session gesture; an explicit close ends it
         removeClickMonitor()
         removeVisibilityObservers()
         panel?.orderOut(nil)
@@ -82,8 +99,20 @@ final class PanelController {
             object: panel, queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                guard let self, let p = self.panel else { return }
-                if p.isVisible && !p.occlusionState.contains(.visible) {
+                guard let self, let p = self.panel, p.isVisible else { return }
+                let visible = p.occlusionState.contains(.visible)
+                if self.isPinned {
+                    // Pinned: never dismiss for visibility — but stop
+                    // paying open-tier cost into an invisible panel, and
+                    // resume when it can be seen again.
+                    if visible {
+                        self.coordinator.enterOpenTier()
+                        self.log.info("pinned panel visible again -> open tier")
+                    } else {
+                        self.coordinator.enterIdleTier()
+                        self.log.info("pinned panel occluded -> idle tier (kept open)")
+                    }
+                } else if !visible {
                     self.log.info("panel occluded -> closing (demote to idle tier)")
                     self.close()
                 }
@@ -94,7 +123,7 @@ final class PanelController {
             object: nil, queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                guard let self, self.isVisible else { return }
+                guard let self, self.isVisible, !self.isPinned else { return }
                 self.log.info("active Space changed -> closing panel")
                 self.close()
             }
@@ -113,7 +142,8 @@ final class PanelController {
 
     private func makePanel() -> DropPanel {
         let panel = DropPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 360, height: 480),
+            contentRect: NSRect(x: 0, y: 0, width: 360,
+                                height: settings.panelHeight),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -130,8 +160,29 @@ final class PanelController {
         )
         .environmentObject(store)
         .environmentObject(settings)
+        .environmentObject(panelState)
         panel.contentViewController = NSHostingController(rootView: root)
-        panel.onCancel = { [weak self] in self?.close() }
+        panel.onCancel = { [weak self] in
+            guard let self, !self.isPinned else { return }
+            self.close()
+        }
+
+        // Height is user-resizable (borderless windows resize from their
+        // edges once .resizable is in the style mask); width stays
+        // locked to the design's 360 via min == max. The chosen height
+        // persists through settings.
+        panel.styleMask.insert(.resizable)
+        panel.minSize = NSSize(width: 360, height: 320)
+        panel.maxSize = NSSize(width: 360, height: 900)
+        resizeObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didEndLiveResizeNotification,
+            object: panel, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, let p = self.panel else { return }
+                self.settings.panelHeight = Double(p.frame.height)
+            }
+        }
         return panel
     }
 
@@ -167,7 +218,10 @@ final class PanelController {
         clickMonitor = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown]
         ) { [weak self] _ in
-            Task { @MainActor in self?.close() }
+            Task { @MainActor in
+                guard let self, !self.isPinned else { return }
+                self.close()
+            }
         }
     }
 

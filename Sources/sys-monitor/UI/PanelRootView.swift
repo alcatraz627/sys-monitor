@@ -7,6 +7,7 @@ import AppKit
 struct PanelRootView: View {
     @EnvironmentObject var store: MetricsStore
     @EnvironmentObject var settings: SettingsStore
+    @EnvironmentObject var panelState: PanelState
     /// While the user is hovering over the process list, we freeze the
     /// displayed *ordering* to whatever it was when the hover began. This
     /// stops rows from re-sorting out from under a click or scroll — but
@@ -79,6 +80,17 @@ struct PanelRootView: View {
             HStack(spacing: DesignTokens.Space.s) {
                 Text("CPU").font(DesignTokens.numericFont(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
+                    .help("Overall CPU load; sparkline shows the last 60 s on a fixed 0–100% scale")
+                Button(action: { panelState.isPinned.toggle() }) {
+                    Image(systemName: panelState.isPinned ? "pin.fill" : "pin")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(panelState.isPinned ? Color.accentColor : Color.secondary.opacity(0.6))
+                        .rotationEffect(.degrees(45))
+                }
+                .buttonStyle(.plain)
+                .help(panelState.isPinned
+                      ? "Pinned — clicks outside, Esc, and Space switches won't close the panel. Click the menu-bar icon or unpin to close."
+                      : "Pin the panel open")
                 Spacer()
                 // The header value is where "now" gets its color — the
                 // sparkline trace stays neutral (history is shape).
@@ -101,6 +113,7 @@ struct PanelRootView: View {
             HStack(spacing: DesignTokens.Space.s) {
                 Text("MEM").font(DesignTokens.numericFont(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
+                    .help("Used memory (active + wired + compressed); sparkline shows the last 60 s, auto-scaled to the corner labels")
                 Spacer()
                 Text(memValueText)
                     .font(DesignTokens.numericFont(size: 12, weight: .medium))
@@ -115,11 +128,13 @@ struct PanelRootView: View {
                       showRangeLabels: true)
             HStack(spacing: DesignTokens.Space.m) {
                 Text("swap \(swapText)")
+                    .help("Swap space in use — sustained growth means RAM is oversubscribed")
                 Spacer()
                 HStack(spacing: 4) {
                     Text("pressure").foregroundStyle(.secondary)
                     Text(pressureText).foregroundStyle(pressureColor)
                 }
+                .help("Kernel memory-pressure level, polled every tick: normal / warn / critical")
             }
             .font(DesignTokens.numericFont(size: 10))
             .foregroundStyle(.secondary)
@@ -177,6 +192,7 @@ struct PanelRootView: View {
                 .pickerStyle(.segmented)
                 .controlSize(.mini)
                 .frame(width: 80)
+                .help("Rank the list by CPU or memory (ranking uses a smoothed value so rows don't slot-machine)")
             }
             ProcessList(
                 metric: store.snapshot.processes,
@@ -223,6 +239,7 @@ struct PanelRootView: View {
                 .textFieldStyle(.plain)
                 .font(DesignTokens.numericFont(size: 11))
                 .frame(maxWidth: 80)
+                .help("Filter by name, pid digits, or \">N\" for CPU at or above N%")
             if !searchText.isEmpty {
                 Button(action: { searchText = "" }) {
                     Image(systemName: "xmark.circle.fill")
@@ -377,15 +394,23 @@ struct PanelRootView: View {
         guard case .ok(let procs) = store.snapshot.processes else { return [] }
         // Apply the user's search filter first — smaller working set,
         // cheaper sort.
+        // Three filter shapes, dispatched on the needle itself:
+        //   ">N"    CPU at or above N percent
+        //   digits  pid contains those digits
+        //   text    case-insensitive name match (kernel name + resolved
+        //           display name — proc_name clips at ~32 bytes, so the
+        //           name a user knows may only exist in the resolved one)
+        let raw = searchText.trimmingCharacters(in: .whitespaces)
         let filtered: [ProcSample]
-        if searchText.isEmpty {
+        if raw.isEmpty {
             filtered = procs
+        } else if raw.hasPrefix(">"),
+                  let pct = Double(raw.dropFirst().replacingOccurrences(of: "%", with: "")) {
+            filtered = procs.filter { $0.cpu * 100 >= pct }
+        } else if raw.allSatisfy({ $0.isNumber }) {
+            filtered = procs.filter { String($0.pid).contains(raw) }
         } else {
-            // Match the truncated kernel name AND the executable basename
-            // when we have it — `proc_name` clips at ~32 bytes, so the
-            // name a user knows from Activity Monitor may only exist in
-            // the path.
-            let needle = searchText.lowercased()
+            let needle = raw.lowercased()
             filtered = procs.filter { p in
                 if p.name.lowercased().contains(needle) { return true }
                 if let resolved = pidDisplayName[p.pid] {
@@ -483,6 +508,7 @@ private struct CoreStrip: View {
                 }
             }
         }
+        .help("One bar per core (\(loads.count)) — fill and color track each core's load")
     }
 }
 
@@ -496,6 +522,9 @@ private struct ThroughputCell: View {
             Text(label)
                 .font(DesignTokens.numericFont(size: 10, weight: .semibold))
                 .foregroundStyle(.secondary)
+                .help(label == "NET"
+                      ? "Network throughput across all interfaces: ↓ received · ↑ sent, per second"
+                      : "Disk throughput across all drives: ↓ read · ↑ written, per second")
             HStack(spacing: DesignTokens.Space.s) {
                 HStack(spacing: 2) {
                     Text("↓")
@@ -573,7 +602,9 @@ private struct ProcessList: View {
                 listView.padding(.trailing, 10)
             }
         }
-        .frame(height: 200)
+        // Flexible: the process list absorbs whatever height the user
+        // drags the panel to (the fixed sections above it don't flex).
+        .frame(minHeight: 140, maxHeight: .infinity)
     }
 
     private var loadingView: some View {
@@ -664,6 +695,7 @@ private struct ProcessList: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(processRowLabel(for: p))
         .accessibilityHint("Double tap to expand")
+        .help(pidPath[p.pid] ?? displayName(for: p))
         .task(id: p.pid) {
             // Look up path + icon + display name once per pid. All cheap
             // (proc_pidpath is one syscall; NSWorkspace caches icons
@@ -711,13 +743,16 @@ private struct ProcessList: View {
         let base = (path as NSString).lastPathComponent
         if !base.isEmpty && !isVersionLike(base) { return base }
 
+        // Lowercased set + lowercased lookup: directory conventions vary
+        // ("Versions" in frameworks, "versions" in nvm/asdf trees).
         let structural: Set<String> = [
-            "MacOS", "Contents", "Versions", "Frameworks", "Helpers",
-            "Resources", "Current", "A", "bin", "sbin", "libexec", "usr",
+            "macos", "contents", "versions", "frameworks", "helpers",
+            "resources", "current", "a", "bin", "sbin", "libexec", "usr",
+            "lib", "install", "installs", "dist", "build", "release",
         ]
         for component in path.split(separator: "/").reversed().dropFirst() {
             let s = String(component)
-            if structural.contains(s) || isVersionLike(s) { continue }
+            if structural.contains(s.lowercased()) || isVersionLike(s) { continue }
             return s
                 .replacingOccurrences(of: ".app", with: "")
                 .replacingOccurrences(of: ".framework", with: "")
@@ -726,9 +761,12 @@ private struct ProcessList: View {
         return fallback
     }
 
-    /// "2.1.162", "14", "1.0" — digits and dots only.
+    /// "2.1.162", "14", "1.0", "v22.1.0" — digits and dots, optional
+    /// leading "v".
     private static func isVersionLike(_ s: String) -> Bool {
-        !s.isEmpty && s.allSatisfy { $0.isNumber || $0 == "." }
+        var body = Substring(s)
+        if body.first == "v" || body.first == "V" { body = body.dropFirst() }
+        return !body.isEmpty && body.allSatisfy { $0.isNumber || $0 == "." }
     }
 
     private func processRowLabel(for p: ProcSample) -> String {
@@ -754,6 +792,10 @@ private struct ExpandedRow: View {
     /// One-line outcome of the last signal attempt ("asked to quit",
     /// "no permission — command copied", …).
     @State private var killFeedback: String?
+
+    /// One-shot process biography (owner, threads, uptime, parent),
+    /// fetched when the row expands — never on the sampling tick.
+    @State private var details: ProcessIntrospection.Details?
 
     /// Indent aligns the row's content with the parent's name column —
     /// 10pt chevron + the standard inter-cell gap.
@@ -802,10 +844,20 @@ private struct ExpandedRow: View {
                 }
                 Spacer()
             }
+            if let d = details {
+                Text(detailLine(d))
+                    .lineLimit(1)
+                    .font(DesignTokens.numericFont(size: 10))
+                    .foregroundStyle(.tertiary)
+                    .help("Owner · threads · time since launch · parent pid")
+            }
         }
         .padding(.leading, leadingIndent)
         .padding(.vertical, 5)
         .padding(.trailing, DesignTokens.Space.s)
+        .task(id: pid) {
+            details = ProcessIntrospection.details(for: pid)
+        }
         // Stronger contrast than secondary@0.06 so the expanded row reads
         // as a contained sub-surface, not as a same-row continuation.
         // Semantic recessed color, not hardcoded black — adapts to light
@@ -927,6 +979,25 @@ private struct ExpandedRow: View {
             killFeedback = "already gone"
         }
         scheduleFeedbackRevert()
+    }
+
+    /// "alcatraz · 14 threads · up 2h 13m · ppid 1" — whatever fields
+    /// resolved; missing ones are simply omitted.
+    private func detailLine(_ d: ProcessIntrospection.Details) -> String {
+        var parts: [String] = []
+        if let u = d.userName { parts.append(u) }
+        if let t = d.threadCount { parts.append("\(t) thread\(t == 1 ? "" : "s")") }
+        if let s = d.startDate { parts.append("up \(Self.uptimeText(since: s))") }
+        if let pp = d.parentPid { parts.append("ppid \(pp)") }
+        return parts.joined(separator: " · ")
+    }
+
+    private static func uptimeText(since start: Date) -> String {
+        let secs = max(0, Int(Date().timeIntervalSince(start)))
+        if secs < 60 { return "\(secs)s" }
+        if secs < 3600 { return "\(secs / 60)m" }
+        if secs < 86_400 { return "\(secs / 3600)h \((secs % 3600) / 60)m" }
+        return "\(secs / 86_400)d \((secs % 86_400) / 3600)h"
     }
 
     /// The feedback line borrows the path line's slot — give the slot

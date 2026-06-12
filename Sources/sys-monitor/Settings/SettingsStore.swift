@@ -59,6 +59,7 @@ public final class SettingsStore: ObservableObject {
     private static let kSort  = "defaultSort"
     private static let kLogin = "launchAtLogin"
     private static let kArrowActivity = "arrowActivityIndicator"
+    private static let kPanelHeight = "panelHeight"
 
     @Published public var idleCadenceSeconds: Double {
         didSet {
@@ -86,6 +87,13 @@ public final class SettingsStore: ObservableObject {
     }
     @Published public var arrowActivityIndicator: Bool {
         didSet { defaults.set(arrowActivityIndicator, forKey: Self.kArrowActivity) }
+    }
+
+    /// Panel height in points, set by dragging the panel's bottom edge
+    /// (not exposed in the settings UI — the resize itself is the
+    /// control). Clamped to the panel's min/max on load.
+    @Published public var panelHeight: Double {
+        didSet { defaults.set(panelHeight, forKey: Self.kPanelHeight) }
     }
 
     /// Read-only status of the actual login-item registration, refreshed
@@ -116,6 +124,8 @@ public final class SettingsStore: ObservableObject {
         // Default ON — the brightness step is free (no perf cost) and
         // makes the NET / DISK arrows feel "live."
         self.arrowActivityIndicator = (defaults.object(forKey: Self.kArrowActivity) as? Bool) ?? true
+        let storedHeight = (defaults.object(forKey: Self.kPanelHeight) as? Double) ?? 480
+        self.panelHeight = min(max(storedHeight, 320), 900)
     }
 
     /// idle cadence must be >= open cadence (idle is the always-on budget
