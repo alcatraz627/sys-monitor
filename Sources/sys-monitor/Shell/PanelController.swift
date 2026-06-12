@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import Combine
 import os
 
 /// Shared panel-session state the SwiftUI content can both read and
@@ -43,17 +44,26 @@ final class PanelController {
     /// SwiftUI view so a dead controller doesn't keep settings alive.
     var onShowSettings: (() -> Void)?
 
+    private var pinSync: AnyCancellable?
+
     init(store: MetricsStore, settings: SettingsStore, coordinator: SamplingCoordinator) {
         self.store = store
         self.settings = settings
         self.coordinator = coordinator
+        // Pin state round-trips through settings so it survives relaunch.
+        panelState.isPinned = settings.panelPinned
+        pinSync = panelState.$isPinned.dropFirst().sink { [weak settings] pinned in
+            settings?.panelPinned = pinned
+        }
     }
 
     /// Close the panel without dismissing-via-event. Used by the settings
     /// flow so the dropdown gets out of the way before the settings window
     /// opens.
     func close() {
-        panelState.isPinned = false   // pin is a session gesture; an explicit close ends it
+        // The pin deliberately SURVIVES close: it's the user's standing
+        // preference for how the panel behaves, and resetting it here
+        // would force re-pinning on every open.
         removeClickMonitor()
         removeVisibilityObservers()
         panel?.orderOut(nil)

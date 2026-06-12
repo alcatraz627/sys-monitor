@@ -104,6 +104,19 @@ actionable, cheap always-on):
 - **Watch a process**: pin a specific process row to the top of the list
   regardless of rank (the natural companion to hover-freeze and kill —
   "I'm watching THIS one"). Cheap: a pinned-pids set + sort override.
+- **Per-process DISK I/O column + sort + `>N:disk` filter** (user
+  request 2026-06-12): feasible — `proc_pid_rusage` exposes cumulative
+  `ri_diskio_bytesread/written` per pid (already used one-shot in the
+  expanded row). Live rates need the sampler to call rusage per pid per
+  process-tick and delta against a prev-map, exactly like the cpu-time
+  map — roughly +1 syscall per pid per 2 s, acceptable for the open
+  tier. Then DISK joins the CPU|MEM sort control and the threshold
+  filter. **Per-process NETWORK I/O is NOT feasible** without private
+  frameworks: macOS offers no public per-pid network counters
+  (`nettop`/Activity Monitor use the private NetworkStatistics
+  framework). Honest options: skip it, or a coarse "this process has N
+  open sockets" count via `proc_pidinfo(PROC_PIDLISTFDS)` — presence,
+  not throughput.
 - **Battery / power cell**: battery %, charging state, and (Apple
   Silicon) watts via the public `IOPSCopyPowerSourcesInfo` — cheap,
   public API, huge glance value on MacBooks. Bar cell + panel row.

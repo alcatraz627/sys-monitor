@@ -1,6 +1,44 @@
 import SwiftUI
 import AppKit
 
+/// Shared sink for the panel's hover-help status line. macOS suppresses
+/// real tooltips for inactive apps, and this app is a nonactivating
+/// accessory by design — `.explain()` never fires here. Instead, hoverable
+/// elements publish a one-line explanation that the footer status line
+/// renders (the htop function-bar idiom).
+@MainActor
+final class HoverHelp: ObservableObject {
+    @Published var text: String?
+}
+
+private struct HoverHelpModifier: ViewModifier {
+    @EnvironmentObject var help: HoverHelp
+    let text: String
+    func body(content: Content) -> some View {
+        content.onHover { hovering in
+            if hovering {
+                help.text = text
+            } else if help.text == text {
+                help.text = nil
+            }
+        }
+    }
+}
+
+extension View {
+    /// Publish `text` to the panel's footer status line while hovered.
+    func hoverHelp(_ text: String) -> some View {
+        modifier(HoverHelpModifier(text: text))
+    }
+
+    /// Both help channels at once: the status line (works always) and
+    /// the system tooltip (works if the app is ever active — and feeds
+    /// accessibility).
+    func explain(_ text: String) -> some View {
+        self.help(text).hoverHelp(text)
+    }
+}
+
 /// The dropdown panel's SwiftUI root: CPU + per-core strip, memory + swap,
 /// network/disk throughput, and a sortable process list. Reads everything
 /// from the shared `MetricsStore` — no sampling here, just rendering.
@@ -50,6 +88,8 @@ struct PanelRootView: View {
 
     typealias ProcSort = SettingsStore.ProcSort
 
+    @StateObject private var hoverHelp = HoverHelp()
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             cpuSection
@@ -60,8 +100,10 @@ struct PanelRootView: View {
             divider
             processSection
             divider
+            statusLine
             footer
         }
+        .environmentObject(hoverHelp)
         .padding(DesignTokens.Space.s)
         .frame(width: 360)
         .background(
@@ -80,7 +122,7 @@ struct PanelRootView: View {
             HStack(spacing: DesignTokens.Space.s) {
                 Text("CPU").font(DesignTokens.numericFont(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
-                    .help("Overall CPU load; sparkline shows the last 60 s on a fixed 0–100% scale")
+                    .explain("Overall CPU load; sparkline shows the last 60 s on a fixed 0–100% scale")
                 Button(action: { panelState.isPinned.toggle() }) {
                     Image(systemName: panelState.isPinned ? "pin.fill" : "pin")
                         .font(.system(size: 9, weight: .medium))
@@ -88,7 +130,7 @@ struct PanelRootView: View {
                         .rotationEffect(.degrees(45))
                 }
                 .buttonStyle(.plain)
-                .help(panelState.isPinned
+                .explain(panelState.isPinned
                       ? "Pinned — clicks outside, Esc, and Space switches won't close the panel. Click the menu-bar icon or unpin to close."
                       : "Pin the panel open")
                 Spacer()
@@ -113,7 +155,7 @@ struct PanelRootView: View {
             HStack(spacing: DesignTokens.Space.s) {
                 Text("MEM").font(DesignTokens.numericFont(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
-                    .help("Used memory (active + wired + compressed); sparkline shows the last 60 s, auto-scaled to the corner labels")
+                    .explain("Used memory (active + wired + compressed); sparkline shows the last 60 s, auto-scaled to the corner labels")
                 Spacer()
                 Text(memValueText)
                     .font(DesignTokens.numericFont(size: 12, weight: .medium))
@@ -128,13 +170,13 @@ struct PanelRootView: View {
                       showRangeLabels: true)
             HStack(spacing: DesignTokens.Space.m) {
                 Text("swap \(swapText)")
-                    .help("Swap space in use — sustained growth means RAM is oversubscribed")
+                    .explain("Swap space in use — sustained growth means RAM is oversubscribed")
                 Spacer()
                 HStack(spacing: 4) {
                     Text("pressure").foregroundStyle(.secondary)
                     Text(pressureText).foregroundStyle(pressureColor)
                 }
-                .help("Kernel memory-pressure level, polled every tick: normal / warn / critical")
+                .explain("Kernel memory-pressure level, polled every tick: normal / warn / critical")
             }
             .font(DesignTokens.numericFont(size: 10))
             .foregroundStyle(.secondary)
@@ -192,7 +234,7 @@ struct PanelRootView: View {
                 .pickerStyle(.segmented)
                 .controlSize(.mini)
                 .frame(width: 80)
-                .help("Rank the list by CPU or memory (ranking uses a smoothed value so rows don't slot-machine)")
+                .explain("Rank the list by CPU or memory (ranking uses a smoothed value so rows don't slot-machine)")
             }
             ProcessList(
                 metric: store.snapshot.processes,
@@ -239,7 +281,7 @@ struct PanelRootView: View {
                 .textFieldStyle(.plain)
                 .font(DesignTokens.numericFont(size: 11))
                 .frame(maxWidth: 80)
-                .help("Filter by name, pid digits, or \">N\" for CPU at or above N%")
+                .explain("Filter: name · pid digits · >5:cpu (≥5% CPU) · <300:mem (≤300 MB) — cpu is the default metric")
             if !searchText.isEmpty {
                 Button(action: { searchText = "" }) {
                     Image(systemName: "xmark.circle.fill")
@@ -312,6 +354,20 @@ struct PanelRootView: View {
         byPid.reserveCapacity(procs.count)
         for p in procs { byPid[p.pid] = p }
         return frozen.compactMap { byPid[$0] }
+    }
+
+    /// Fixed-height context line fed by whatever the cursor is over —
+    /// the panel's tooltip surface (real tooltips never appear for a
+    /// nonactivating accessory app). Reserved height so hovering never
+    /// shifts layout.
+    private var statusLine: some View {
+        Text(hoverHelp.text ?? " ")
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .font(DesignTokens.numericFont(size: 9))
+            .foregroundStyle(.tertiary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: 12)
     }
 
     private var footer: some View {
@@ -395,7 +451,8 @@ struct PanelRootView: View {
         // Apply the user's search filter first — smaller working set,
         // cheaper sort.
         // Three filter shapes, dispatched on the needle itself:
-        //   ">N"    CPU at or above N percent
+        //   >N / <N, optional :cpu or :mem suffix — threshold filters
+        //           (cpu in percent, mem in MB; cpu is the default)
         //   digits  pid contains those digits
         //   text    case-insensitive name match (kernel name + resolved
         //           display name — proc_name clips at ~32 bytes, so the
@@ -404,9 +461,8 @@ struct PanelRootView: View {
         let filtered: [ProcSample]
         if raw.isEmpty {
             filtered = procs
-        } else if raw.hasPrefix(">"),
-                  let pct = Double(raw.dropFirst().replacingOccurrences(of: "%", with: "")) {
-            filtered = procs.filter { $0.cpu * 100 >= pct }
+        } else if let threshold = ProcessList.thresholdFilter(raw) {
+            filtered = procs.filter(threshold)
         } else if raw.allSatisfy({ $0.isNumber }) {
             filtered = procs.filter { String($0.pid).contains(raw) }
         } else {
@@ -508,7 +564,7 @@ private struct CoreStrip: View {
                 }
             }
         }
-        .help("One bar per core (\(loads.count)) — fill and color track each core's load")
+        .explain("One bar per core (\(loads.count)) — fill and color track each core's load")
     }
 }
 
@@ -522,7 +578,7 @@ private struct ThroughputCell: View {
             Text(label)
                 .font(DesignTokens.numericFont(size: 10, weight: .semibold))
                 .foregroundStyle(.secondary)
-                .help(label == "NET"
+                .explain(label == "NET"
                       ? "Network throughput across all interfaces: ↓ received · ↑ sent, per second"
                       : "Disk throughput across all drives: ↓ read · ↑ written, per second")
             HStack(spacing: DesignTokens.Space.s) {
@@ -695,7 +751,7 @@ private struct ProcessList: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(processRowLabel(for: p))
         .accessibilityHint("Double tap to expand")
-        .help(pidPath[p.pid] ?? displayName(for: p))
+        .explain(pidPath[p.pid] ?? displayName(for: p))
         .task(id: p.pid) {
             // Look up path + icon + display name once per pid. All cheap
             // (proc_pidpath is one syscall; NSWorkspace caches icons
@@ -714,6 +770,28 @@ private struct ProcessList: View {
                     pid: p.pid, procName: p.name, path: path
                 )
             }
+        }
+    }
+
+    /// Parse ">5", "<3:mem", ">1:CPU" into a predicate, or nil when the
+    /// needle isn't threshold-shaped. CPU values are percent; MEM values
+    /// are megabytes of resident memory. Case-insensitive metric names.
+    static func thresholdFilter(_ raw: String) -> ((ProcSample) -> Bool)? {
+        guard let op = raw.first, op == ">" || op == "<" else { return nil }
+        let body = raw.dropFirst()
+        let parts = body.split(separator: ":", maxSplits: 1)
+        guard let first = parts.first,
+              let value = Double(first.replacingOccurrences(of: "%", with: ""))
+        else { return nil }
+        let metric = parts.count > 1 ? parts[1].lowercased() : "cpu"
+        switch metric {
+        case "cpu":
+            return { op == ">" ? $0.cpu * 100 >= value : $0.cpu * 100 <= value }
+        case "mem":
+            let bytes = value * 1_048_576
+            return { op == ">" ? Double($0.memBytes) >= bytes : Double($0.memBytes) <= bytes }
+        default:
+            return nil
         }
     }
 
@@ -841,15 +919,38 @@ private struct ExpandedRow: View {
                 killButton(label: "Force Kill", sig: SIGKILL, role: .destructive)
                 if let p = path {
                     copyButton(label: "path", command: p, role: .neutral)
+                    Button(action: {
+                        NSWorkspace.shared.activateFileViewerSelecting(
+                            [URL(fileURLWithPath: p)]
+                        )
+                    }) {
+                        Image(systemName: "magnifyingglass.circle")
+                            .font(.system(size: 11))
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 3)
+                            .background(
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(Color.secondary.opacity(0.18))
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .explain("Reveal the executable in Finder")
                 }
                 Spacer()
             }
             if let d = details {
-                Text(detailLine(d))
+                Text(identityLine(d))
                     .lineLimit(1)
                     .font(DesignTokens.numericFont(size: 10))
                     .foregroundStyle(.tertiary)
-                    .help("Owner · threads · time since launch · parent pid")
+                    .explain("Owner · threads · time alive · parent process")
+                if let activity = activityLine(d) {
+                    Text(activity)
+                        .lineLimit(1)
+                        .font(DesignTokens.numericFont(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .explain("Lifetime totals: CPU time burned and disk bytes read/written since launch")
+                }
             }
         }
         .padding(.leading, leadingIndent)
@@ -942,7 +1043,7 @@ private struct ExpandedRow: View {
             )
         }
         .buttonStyle(.plain)
-        .help(sig == SIGTERM ? "Ask the process to quit (SIGTERM)"
+        .explain(sig == SIGTERM ? "Ask the process to quit (SIGTERM)"
                              : "Force kill immediately (SIGKILL)")
     }
 
@@ -981,15 +1082,38 @@ private struct ExpandedRow: View {
         scheduleFeedbackRevert()
     }
 
-    /// "alcatraz · 14 threads · up 2h 13m · ppid 1" — whatever fields
-    /// resolved; missing ones are simply omitted.
-    private func detailLine(_ d: ProcessIntrospection.Details) -> String {
+    /// "alcatraz · 14 threads · up 2h 13m · parent launchd (1)" —
+    /// whatever fields resolved; missing ones are simply omitted.
+    private func identityLine(_ d: ProcessIntrospection.Details) -> String {
         var parts: [String] = []
         if let u = d.userName { parts.append(u) }
         if let t = d.threadCount { parts.append("\(t) thread\(t == 1 ? "" : "s")") }
         if let s = d.startDate { parts.append("up \(Self.uptimeText(since: s))") }
-        if let pp = d.parentPid { parts.append("ppid \(pp)") }
+        if let pp = d.parentPid {
+            parts.append("parent \(d.parentName.map { "\($0) (\(pp))" } ?? "pid \(pp)")")
+        }
         return parts.joined(separator: " · ")
+    }
+
+    /// "cpu 37m total · disk ↓1.2 GB ↑300 MB" — lifetime burn rates that
+    /// tell a runaway from a long-lived steady worker. Nil when rusage
+    /// was denied (other-user processes).
+    private func activityLine(_ d: ProcessIntrospection.Details) -> String? {
+        var parts: [String] = []
+        if let c = d.cpuTime, c >= 1 {
+            parts.append("cpu \(Self.cpuTimeText(c)) total")
+        }
+        if let r = d.diskBytesRead, let w = d.diskBytesWritten, r + w > 0 {
+            parts.append("disk ↓\(formatBytes(Double(r))) ↑\(formatBytes(Double(w)))")
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private static func cpuTimeText(_ secs: TimeInterval) -> String {
+        let s = Int(secs)
+        if s < 60 { return "\(s)s" }
+        if s < 3600 { return "\(s / 60)m \(s % 60)s" }
+        return "\(s / 3600)h \((s % 3600) / 60)m"
     }
 
     private static func uptimeText(since start: Date) -> String {
@@ -1028,7 +1152,7 @@ private struct ExpandedRow: View {
                 )
         }
         .buttonStyle(.plain)
-        .help("Copy to clipboard: \(command)")
+        .explain("Copy to clipboard: \(command)")
     }
 
     private func roleFill(_ role: ButtonRole) -> Color {
@@ -1061,7 +1185,7 @@ private struct ExpandedRow: View {
             )
         }
         .buttonStyle(.plain)
-        .help("Bring this app to the front")
+        .explain("Bring this app to the front")
     }
 }
 

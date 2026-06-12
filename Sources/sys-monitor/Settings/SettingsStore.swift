@@ -60,6 +60,7 @@ public final class SettingsStore: ObservableObject {
     private static let kLogin = "launchAtLogin"
     private static let kArrowActivity = "arrowActivityIndicator"
     private static let kPanelHeight = "panelHeight"
+    private static let kPanelPinned = "panelPinned"
 
     @Published public var idleCadenceSeconds: Double {
         didSet {
@@ -96,6 +97,14 @@ public final class SettingsStore: ObservableObject {
         didSet { defaults.set(panelHeight, forKey: Self.kPanelHeight) }
     }
 
+    /// Whether the panel pin is engaged. A pin the user set survives
+    /// close, reopen, and relaunch — it un-sets only when the user
+    /// unpins. (Its first version reset on close, which made the
+    /// feature need re-arming on every open.)
+    @Published public var panelPinned: Bool {
+        didSet { defaults.set(panelPinned, forKey: Self.kPanelPinned) }
+    }
+
     /// Read-only status of the actual login-item registration, refreshed
     /// after a register/unregister call. The setting (above) is the user's
     /// *intent*; this is what `SMAppService` actually believes.
@@ -126,6 +135,7 @@ public final class SettingsStore: ObservableObject {
         self.arrowActivityIndicator = (defaults.object(forKey: Self.kArrowActivity) as? Bool) ?? true
         let storedHeight = (defaults.object(forKey: Self.kPanelHeight) as? Double) ?? 480
         self.panelHeight = min(max(storedHeight, 320), 900)
+        self.panelPinned = defaults.bool(forKey: Self.kPanelPinned)
     }
 
     /// idle cadence must be >= open cadence (idle is the always-on budget
