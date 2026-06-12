@@ -75,7 +75,7 @@ htop's enduring lesson: a process list you can't act on is half a tool.
 | 3.2 | **Esc dismisses the panel.** The panel takes key focus but `cancelOperation(_:)` is unimplemented — no keyboard dismissal exists at all (also a VoiceOver gap). | `DropPanel.swift` | ~6 lines |
 | 3.3 | **Clamp panel to screen edge.** Centered anchoring with no `visibleFrame` clamp; status items live near the right edge, so the panel can render partially off-screen. | `PanelController.swift:92-100` | 3 lines |
 | 3.4 | **Right-click menu on the status item.** Standard escape hatch (Settings…, Quit) when the panel is broken or off-screen; every long-lived menu-bar utility has one. | `StatusItemController.swift:39-42` | ~25 lines |
-| 3.5 | **Cut open latency.** First data tick lands a full open-cadence after open (~1–2 s of "Measuring…"). (a) Schedule one early tick at ~+300 ms; (b) retain `prevProcCpu` baseline across close→reopen when younger than the gap threshold; (c) on open, publish the freshest idle-tier sample synchronously before the first open tick — CPU/MEM gauges and sparklines paint instantly from data ≤2 s old, only the process list waits for its baseline. (c) is macmon's pull-with-staleness-cache shape (`get_metrics_now(stale_after_ms)`). Ship (a)+(c) first. | `SamplingCoordinator.swift:174, 210`; research rec 3 | (a) ~10 / (c) ~15 / (b) refactor |
+| 3.5 | **Cut open latency.** First data tick lands a full open-cadence after open (~1–2 s of "Measuring…"). (a) Schedule one early tick at ~+300 ms; (b) retain `prevProcCpu` baseline across close→reopen when younger than the gap threshold; (c) on open, publish the freshest idle-tier sample synchronously before the first open tick — CPU/MEM gauges and sparklines paint instantly from data ≤2 s old, only the process list waits for its baseline. (c) is macmon's pull-with-staleness-cache shape (`get_metrics_now(stale_after_ms)`). (d) **Fix the tier-switch gap misclassification** (field bug FB-2): the first tick after a tier switch computes `elapsed` against the *old* tier's last tick but tests it against the *new* tier's gap threshold — switching from a 5 s idle cadence into the 1 s open tier flags `elapsed > 2 s` as a gap ~60% of the time, wiping NET/DISK (and all rates) to `—` for a tick. The transition must carry the outgoing cadence into the first tick's gap test (or stamp `prevTickTime`'s expected cadence alongside it). Ship (a)+(c)+(d) first. | `SamplingCoordinator.swift` tick gap checks; research rec 3 | (a) ~10 / (c) ~15 / (d) ~10 / (b) refactor |
 | 3.6 | **Better process names.** `proc_name` truncates at ~32 bytes and search matches the truncated string. Prefer the already-cached executable path basename / `NSRunningApplication.localizedName`. | `ProcessSampler.swift:62-68`, `PanelRootView.swift:343-345, 605-619` | ~15 lines |
 
 ## Phase 4 — Capability: history and Apple Silicon power
@@ -137,6 +137,28 @@ revert; wake-from-sleep re-baseline.
   by design, which is exactly what makes 4.2 (private IOReport) available
   to us at all.
 
+## Field bug log
+
+User-reported during v2 testing (2026-06-12). Every entry gets a
+reproducing drill *before* its fix, and the drill stays in the suite.
+
+- **FB-1 — Focus on UniversalControl freezes the widget.** Post-v2
+  investigation (no plan item covers it). Initial hypothesis:
+  `focusButton` calls `NSRunningApplication.activate(options:)`
+  synchronously on the main thread (`PanelRootView.swift:752-758`);
+  UniversalControl is a faceless system agent that is not activatable,
+  and the activation request plausibly blocks in an IPC round-trip —
+  freezing the main thread freezes both the panel and the glyph (all
+  rendering is main-thread). Likely shape of fix: only offer Focus for
+  `activationPolicy == .regular` apps, and treat "no panel action may
+  block the main thread" as a hard invariant. Severity: high (freeze),
+  scope: panel action surface.
+- **FB-2 — Opening/closing the dropdown blanks some NET/DISK values.**
+  Root cause identified — tier-switch gap misclassification; folded into
+  3.5(d) above, so it's fixed *within* v2 Phase 3, not post-v2. The
+  partial pattern ("some values, most times") matches: it depends on how
+  long before the switch the last idle tick fired.
+
 ## Verification protocol
 
 Each phase lands only after its checklist below passes, in this order:
@@ -157,6 +179,46 @@ Each phase lands only after its checklist below passes, in this order:
 A checklist row counts only when *executed in-session* — passive "looks
 right" inspection is what shipped the Phase 1 bugs (atone
 `declared-ready-without-runtime-exercise`, 5×).
+
+### Harness upgrades (from Phases 1–2 experience)
+
+What produced the catches so far: induced states, mocked feeds,
+temporary instruments, and skeptical application of review findings.
+What limited them: every drill was ad-hoc (rebuilt by hand), temp
+instruments cost a build cycle each, and anything needing the panel
+open was blocked on a human mouse. Upgrades, in priority order:
+
+1. **Headless panel test hook.** A debug-only signal handler (e.g.
+   SIGUSR1 → `panelController.toggle()`, SIGUSR2 → close), compiled in
+   `#if DEBUG` or gated on an env var. This single hook converts every
+   "needs a mouse" row — 2.1 Space-switch demote, 2.6 divisor timing,
+   3.5 open-latency stopwatch, FB-2's reproduction — into a headless
+   drill. Highest leverage item on this list.
+2. **Drills become committed scripts.** Promote the ad-hoc drills from
+   Phases 1–2 (pressure induction, fault injection, display-sleep
+   cycle, occlusion soak) into `tools/drills/*.sh`, each exiting
+   non-zero on failure. Every phase's verification re-runs ALL prior
+   drills — behavioral regression suite, not just a one-time gate.
+3. **Standing debug observability.** A `SYSMON_DEBUG=1` env check that
+   enables the per-tick debug logs permanently (tick timing, rates,
+   render decisions) instead of temp-patch → build → drill → revert →
+   build. Field bug reports become diagnosable with
+   `SYSMON_DEBUG=1 + log stream` instead of an instrumented rebuild.
+4. **Bug-report → drill discipline.** Every field bug (FB-n) gets a
+   reproducing drill BEFORE the fix is written, and the drill joins the
+   suite. The fix is proven by the drill flipping, not by re-reading
+   the diff.
+5. **A/B on fixes when cheap.** Demonstrate the bug on the pre-fix
+   binary first (1.3's drill proved the fix's signature but never
+   showed the inflation live — structural evidence carried it, A/B
+   would have been stronger).
+6. **Soak-with-assertions before every commit.** One script: N-minute
+   soak that greps for invariant violations (out-of-order drops, crash
+   reports, RSS growth beyond threshold, unexpected transitions) and
+   samples self-CPU. Run as the last gate of every phase.
+7. **Pull Phase 5's unit tests forward.** RateMath/formatBps/gap-logic
+   boundary tables catch the arithmetic class (tick wrap, gap
+   misclassification like FB-2) at build time — cheaper than any drill.
 
 ### Phase 1 checklist (trust) — executed 2026-06-12
 
