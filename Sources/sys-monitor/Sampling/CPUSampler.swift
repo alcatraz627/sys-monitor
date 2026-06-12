@@ -39,11 +39,14 @@ public struct CPUSampler: Sampler {
         guard kr == KERN_SUCCESS else {
             throw SamplerError.mach(kr, op: "host_statistics(HOST_CPU_LOAD_INFO)")
         }
+        // cpu_ticks fields are natural_t (UInt32) and exceed Int32.max within
+        // weeks of host uptime — any signed round-trip traps. Pass through
+        // unchanged; RateMath deltas with &- so wrap is handled there.
         return CPUTicks(
-            user:   UInt32(bitPattern: Int32(info.cpu_ticks.0)),
-            system: UInt32(bitPattern: Int32(info.cpu_ticks.1)),
-            idle:   UInt32(bitPattern: Int32(info.cpu_ticks.2)),
-            nice:   UInt32(bitPattern: Int32(info.cpu_ticks.3))
+            user:   info.cpu_ticks.0,
+            system: info.cpu_ticks.1,
+            idle:   info.cpu_ticks.2,
+            nice:   info.cpu_ticks.3
         )
     }
 
