@@ -131,6 +131,7 @@ final class PanelController {
         .environmentObject(store)
         .environmentObject(settings)
         panel.contentViewController = NSHostingController(rootView: root)
+        panel.onCancel = { [weak self] in self?.close() }
         return panel
     }
 
@@ -140,9 +141,16 @@ final class PanelController {
         guard let button = statusItem?.button, let buttonWindow = button.window else { return }
         let buttonFrameInScreen = buttonWindow.convertToScreen(button.frame)
         let panelSize = panel.frame.size
-        // Center under the button, with a small gap from the menu bar.
-        let x = buttonFrameInScreen.midX - panelSize.width / 2
+        // Center under the button, with a small gap from the menu bar —
+        // then clamp into the visible frame: status items live near the
+        // right screen edge, where naive centering pushes half the panel
+        // off-screen.
+        var x = buttonFrameInScreen.midX - panelSize.width / 2
         let y = buttonFrameInScreen.minY - panelSize.height - 6
+        if let screen = buttonWindow.screen {
+            let vis = screen.visibleFrame.insetBy(dx: 8, dy: 0)
+            x = min(max(x, vis.minX), vis.maxX - panelSize.width)
+        }
         panel.setFrameOrigin(NSPoint(x: x, y: y))
     }
 

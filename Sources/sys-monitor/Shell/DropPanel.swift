@@ -8,11 +8,21 @@ import AppKit
 /// taking key does NOT activate the app — the Dock stays empty and we
 /// stay an `.accessory` agent.
 ///
-/// Dismiss is driven externally by an `NSEvent` click-outside monitor;
-/// `resignKey` deliberately does NOT dismiss because it also fires on
-/// occlusion, Space switches, and Settings window activation — all of
-/// which should keep the panel open.
+/// Dismissal channels: the click-outside `NSEvent` monitor, Escape (via
+/// `cancelOperation`), and the controller's occlusion / Space-change
+/// observers. `resignKey` deliberately is NOT one of them — it also
+/// fires on Settings window activation, which must keep the panel's
+/// state machine out of the way rather than racing it.
 final class DropPanel: NSPanel {
     override var canBecomeKey: Bool  { true }
     override var canBecomeMain: Bool { false }
+
+    /// Invoked on Escape. AppKit routes `cancelOperation` here whenever
+    /// no view in the responder chain claims the key — including from
+    /// the search field, which is the decided behavior: Esc always
+    /// closes the panel, never just clears the filter.
+    var onCancel: (() -> Void)?
+    override func cancelOperation(_ sender: Any?) {
+        onCancel?()
+    }
 }

@@ -319,29 +319,47 @@ open was blocked on a human mouse. Upgrades, in priority order:
 - [ ] **2.8** Deferred to Phase 3 — meaningfully testable once the
   right-click menu (3.4) exists to hold a tracked menu open.
 
-### Phase 3 checklist (interaction)
+### Phase 3 checklist (interaction) — executed 2026-06-12
 
-- [ ] **3.1** Spawn a disposable `sleep 999`; Terminate from the panel →
-  process exits via SIGTERM; spawn again, Force Kill → SIGKILL.
-  Edges: kill a root-owned pid → `EPERM` falls back to copy-command with
-  explanation; confirm-step resets after timeout/cursor-leave; pid gone
-  between click and confirm → no signal sent to a reused pid (re-verify
-  identity before `kill`).
-- [ ] **3.2** Esc closes the panel when it has key focus.
-  Edge: Esc with the search field focused — decide (clear-then-close vs
-  close) and verify the decided behavior.
-- [ ] **3.3** Status item within ~180 pt of the right screen edge (drag it,
-  or smallest display) → panel fully on-screen. Edge: multi-display
-  boundary placement.
-- [ ] **3.4** Right-click → menu (Settings…, Quit) works; left-click still
-  toggles the panel; menu dismisses cleanly.
-- [ ] **3.5** Stopwatch (log timestamps): click → gauges populated from
-  cached idle sample in <100 ms; process list populated ≈300 ms.
-  Edges: first-ever open with no cached sample → clean measuring state;
-  reopen after a gap longer than threshold → baseline NOT reused.
-- [ ] **3.6** A long-named helper (e.g. "Code Helper (Renderer)") shows its
-  full name and is findable via search by that name. Edge: process whose
-  path lookup fails keeps the `proc_name` fallback.
+- [ ] **3.1** Implemented: two-step confirm (3 s auto-reset), pid-reuse
+  guard (path comparison; honestly documented as unenforceable when the
+  path was unreadable at expand time), `NSRunningApplication.terminate()`
+  ONLY for `.regular` apps with raw `kill(2)` otherwise — the FB-1
+  lesson applied preemptively. EPERM auto-copies the shell command with
+  feedback. NOT runtime-exercised (buttons need a mouse). **Human check:
+  spawn `sleep 999`, expand its row, Terminate → really? → it dies;
+  repeat with Force Kill; try a root process → "no permission" + copy.**
+- [ ] **3.2** Implemented: `cancelOperation` → close; decision recorded —
+  Esc always closes, even from the search field. **Human check: open,
+  press Esc.**
+- [ ] **3.3** Implemented: anchor clamps into `visibleFrame` inset 8 pt;
+  arithmetic review-verified. **Human glance on the smallest display.**
+- [ ] **3.4** Implemented: right-click menu (Settings…, Quit), left-click
+  toggle preserved. **Human check — which is ALSO the 2.8 probe: hold
+  the right-click menu open ≥3 ticks and watch whether the glyph keeps
+  updating.** (Reviewer's analysis: sampling queue unaffected by menu
+  tracking; store updates queue and land at dismiss — so expect the
+  glyph to freeze during tracking and catch up instantly. If observed,
+  2.8's common-modes fix becomes a v2 item; the panel is closed during
+  right-click so the cost is cosmetic.)
+- [x] **3.5** VERIFIED headlessly (SIGUSR1 hook + SYSMON_DEBUG): across
+  two drills and ~8 tier transitions — including user-click-injected
+  ones — zero rate metrics flipped ok→measuring on any transition
+  (FB-2/FB-4 dead), and process data lands on the early tick, one
+  publish after open (~300 ms). (c) was NOT built: with (d) fixed, the
+  first open tick computes real rates from surviving prevs and the
+  store's retained snapshot already paints instantly — the staleness
+  cache would duplicate both. (b) unnecessary for the same reason.
+  Post-review hardening: a per-open epoch prevents a stale early tick
+  from a close→reopen-within-300 ms firing into the new session.
+- [ ] **3.6** Implemented: display + search + accessibility use the
+  executable basename when cached (one-tick sharpening lag accepted and
+  documented). **Human check: find "Code Helper" by its full name.**
+
+Drill-design note for the suite: SIGUSR1 *toggle* is parity-blind — a
+user click between signals inverts open/close intent (observed live).
+Drills that depend on panel state need explicit open/close verbs or
+must assert on the tick log's `tier=` field, not on signal count.
 
 ### Phase 4 checklist (capability)
 

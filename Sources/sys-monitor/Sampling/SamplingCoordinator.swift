@@ -65,6 +65,13 @@ public final class SamplingCoordinator: @unchecked Sendable {
     private var prevDisk: DiskCounters?
     private var prevProcCpu: [Int32: UInt64] = [:]
     private var prevTickTime: TimeInterval = 0
+    /// Cadence that was in force when `prevTickTime` was stamped. The gap
+    /// test must judge the elapsed interval against the cadence it was
+    /// ACCUMULATED under — the first tick after a tier switch or cadence
+    /// change otherwise tests a 5 s idle interval against a 1 s open
+    /// threshold and wipes every healthy rate to "measuring" (field bugs
+    /// FB-2 / FB-4).
+    private var prevTickCadence: Double = 0
 
     // Process enumeration runs every 2nd open tick (it's the open tier's
     // dominant cost, and a 2 s %CPU window is less noisy than 1 s anyway).
@@ -75,6 +82,11 @@ public final class SamplingCoordinator: @unchecked Sendable {
     private var openTickIndex: UInt64 = 0
     private var lastProcSampleTime: TimeInterval = 0
     private var lastProcMetric: Metric<[ProcSample]> = .measuring
+    /// Increments on every open-tier entry. The +300 ms early tick
+    /// captures it at schedule time and aborts on mismatch, so an early
+    /// tick scheduled by one open session can never fire into a later
+    /// one (close→reopen within the delay window).
+    private var openEpoch: UInt64 = 0
 
     /// True while the display is asleep / screen locked — both timers are
     /// cancelled and tier transitions are refused until resume.
@@ -89,6 +101,11 @@ public final class SamplingCoordinator: @unchecked Sendable {
     private var currentPressure: MemoryPressure = .normal
 
     private let log = Logger(subsystem: "dev.sys-monitor.menubar", category: "sampling")
+
+    /// `SYSMON_DEBUG=1` enables a per-tick state line (stream-only debug
+    /// level) so field bug reports are diagnosable with `log stream`
+    /// instead of an instrumented rebuild.
+    private let debugTicks = ProcessInfo.processInfo.environment["SYSMON_DEBUG"] == "1"
 
     // MARK: - Init / lifecycle
 
@@ -310,6 +327,20 @@ public final class SamplingCoordinator: @unchecked Sendable {
             handler: { [weak self] in self?.openTick() }
         )
         activeTier = .open
+
+        // One extra early tick at ~+300 ms: the timer's first tick (+20 ms)
+        // is the process baseline, so without this the first process DATA
+        // arrives a full cadence later. A ~280 ms %CPU window is noisier
+        // but fine for a first paint — the next regular tick corrects it.
+        openEpoch &+= 1
+        let epoch = openEpoch
+        queue.asyncAfter(deadline: .now() + .milliseconds(300)) { [weak self] in
+            guard let self,
+                  self.openEpoch == epoch,
+                  self.activeTier == .open,
+                  !self.displaySuspended else { return }
+            self.openTick()
+        }
     }
 
     private func startTimer(
@@ -337,8 +368,18 @@ public final class SamplingCoordinator: @unchecked Sendable {
         prevDisk = nil
         prevProcCpu.removeAll(keepingCapacity: true)
         prevTickTime = 0
+        prevTickCadence = 0
         lastProcSampleTime = 0
         lastProcMetric = .measuring
+    }
+
+    /// Gap test for the main tick: the threshold honors whichever cadence
+    /// is LARGER of "now" and "when the baseline was stamped", so
+    /// transition ticks judge old-cadence intervals fairly.
+    private func isGapTick(elapsed: TimeInterval, cadence: Double) -> Bool {
+        guard elapsed > 0 else { return true }
+        let judged = max(cadence, prevTickCadence)
+        return elapsed > judged * gapMultiplier
     }
 
     // MARK: - Ticks
@@ -349,7 +390,7 @@ public final class SamplingCoordinator: @unchecked Sendable {
     private func idleTick() {
         let now = monoSeconds()
         let elapsed = (prevTickTime > 0) ? (now - prevTickTime) : 0
-        let isGap = (elapsed <= 0) || (elapsed > idleCadenceSeconds * gapMultiplier)
+        let isGap = isGapTick(elapsed: elapsed, cadence: idleCadenceSeconds)
 
         refreshPressureLevel()
         let cpuMetric  = readOverallCPU(now: now, isGap: isGap)
@@ -362,6 +403,7 @@ public final class SamplingCoordinator: @unchecked Sendable {
             : .measuring
 
         prevTickTime = now
+        prevTickCadence = idleCadenceSeconds
         publishSnapshot(
             cpu: cpuMetric,
             memory: memMetric,
@@ -377,7 +419,7 @@ public final class SamplingCoordinator: @unchecked Sendable {
     private func openTick() {
         let now = monoSeconds()
         let elapsed = (prevTickTime > 0) ? (now - prevTickTime) : 0
-        let isGap = (elapsed <= 0) || (elapsed > openCadenceSeconds * gapMultiplier)
+        let isGap = isGapTick(elapsed: elapsed, cadence: openCadenceSeconds)
 
         refreshPressureLevel()
         let cpuMetric  = readFullCPU(now: now, isGap: isGap)
@@ -386,14 +428,17 @@ public final class SamplingCoordinator: @unchecked Sendable {
         let diskMetric = readDisk(now: now, elapsed: elapsed, isGap: isGap)
 
         // Process enumeration every 2nd tick — see the divisor comment on
-        // `openTickIndex`. Skipped ticks re-publish the last list so the
-        // panel doesn't flash.
+        // `openTickIndex`. Ticks 1 and 2 both sample so the early tick
+        // (scheduled by `transitionToOpen`) can deliver the first process
+        // data ~300 ms after open instead of two full cadences later.
+        // Skipped ticks re-publish the last list so the panel doesn't flash.
         openTickIndex &+= 1
-        if openTickIndex % 2 == 1 {
+        if openTickIndex <= 2 || openTickIndex % 2 == 1 {
             lastProcMetric = readProcesses(now: now)
         }
 
         prevTickTime = now
+        prevTickCadence = openCadenceSeconds
         publishSnapshot(
             cpu: cpuMetric,
             memory: memMetric,
@@ -557,6 +602,16 @@ public final class SamplingCoordinator: @unchecked Sendable {
         disk: Metric<Throughput>
     ) {
         generation &+= 1
+        if debugTicks {
+            func s<T>(_ m: Metric<T>) -> String {
+                switch m {
+                case .ok: return "ok"
+                case .measuring: return "meas"
+                case .unavailable: return "unav"
+                }
+            }
+            log.debug("tick gen=\(self.generation) tier=\(self.activeTier == .open ? "open" : "idle", privacy: .public) cpu=\(s(cpu), privacy: .public) mem=\(s(memory), privacy: .public) net=\(s(net), privacy: .public) disk=\(s(disk), privacy: .public) proc=\(s(processes), privacy: .public)")
+        }
         let snap = MetricsSnapshot(
             generation: generation,
             cpu: cpu,

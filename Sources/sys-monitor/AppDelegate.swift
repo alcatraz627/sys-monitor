@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var panelController: PanelController?
     private var settingsWindowController: SettingsWindowController?
     private var cancellables = Set<AnyCancellable>()
+    private var testHookSource: DispatchSourceSignal?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let settings = SettingsStore()
@@ -41,10 +42,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let statusItemController = StatusItemController(
             store: store,
             cells: settings.barCells.ordered,
-            activityArrows: settings.arrowActivityIndicator
-        ) { [weak panelController] in
-            panelController?.toggle()
-        }
+            activityArrows: settings.arrowActivityIndicator,
+            onClick: { [weak panelController] in
+                panelController?.toggle()
+            },
+            onShowSettings: { [weak settingsWindow] in
+                settingsWindow?.show()
+            }
+        )
         panelController.bind(statusItem: statusItemController.statusItem)
 
         // Idle-tier samplers track the bar cells: if NET / DISK is shown
@@ -132,6 +137,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                name: NSNotification.Name("com.apple.screenIsUnlocked"), object: nil)
 
         coordinator.startIdleTier()
+
+        // Headless test hook: `SYSMON_TEST_HOOKS=1` + SIGUSR1 toggles the
+        // panel, letting verification drills exercise open/close paths
+        // (tier transitions, open latency) without a mouse. Off unless
+        // the env var is set, so a stray signal can't pop the panel in
+        // normal use.
+        if ProcessInfo.processInfo.environment["SYSMON_TEST_HOOKS"] == "1" {
+            signal(SIGUSR1, SIG_IGN)
+            let src = DispatchSource.makeSignalSource(signal: SIGUSR1, queue: .main)
+            src.setEventHandler { [weak panelController] in
+                panelController?.toggle()
+            }
+            src.resume()
+            testHookSource = src
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {

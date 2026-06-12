@@ -32,7 +32,8 @@ final class StatusItemController {
         store: MetricsStore,
         cells: [BarCell] = [.cpu, .mem],
         activityArrows: Bool = true,
-        onClick: @escaping () -> Void
+        onClick: @escaping () -> Void,
+        onShowSettings: @escaping () -> Void
     ) {
         self.store = store
         self.renderer = GlyphRenderer(cells: cells, activityArrows: activityArrows)
@@ -46,12 +47,20 @@ final class StatusItemController {
 
         // Hook the button's click. AppKit's target/action wants an
         // `@objc` selector, so we route through a tiny NSObject shim
-        // and keep a strong reference to it from here.
-        let target = ClickTarget(handler: onClick)
+        // and keep a strong reference to it from here. Left-click
+        // toggles the panel; right-click shows a small menu — the
+        // standard escape hatch when the panel itself is broken or
+        // off-screen.
+        let target = ClickTarget(
+            handler: onClick,
+            onShowSettings: onShowSettings,
+            statusItem: statusItem
+        )
         self.clickTarget = target
         if let button = statusItem.button {
             button.target = target
             button.action = #selector(ClickTarget.fire)
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
 
         subscription = store.$snapshot.sink { [weak self] snap in
@@ -105,11 +114,54 @@ final class StatusItemController {
 }
 
 /// AppKit target/action only accepts `@objc` selectors on `NSObject`
-/// subclasses, so we route the SwiftUI/Swift-closure click handler through
-/// this minimal shim. Lives as long as the StatusItemController.
+/// subclasses, so we route the SwiftUI/Swift-closure click handlers
+/// through this minimal shim. Lives as long as the StatusItemController.
+/// Left-click runs the toggle handler; right-click pops a context menu.
 @MainActor
 private final class ClickTarget: NSObject {
     private let handler: () -> Void
-    init(handler: @escaping () -> Void) { self.handler = handler }
-    @objc func fire() { handler() }
+    private let onShowSettings: () -> Void
+    private weak var statusItem: NSStatusItem?
+
+    init(
+        handler: @escaping () -> Void,
+        onShowSettings: @escaping () -> Void,
+        statusItem: NSStatusItem
+    ) {
+        self.handler = handler
+        self.onShowSettings = onShowSettings
+        self.statusItem = statusItem
+    }
+
+    @objc func fire() {
+        if NSApp.currentEvent?.type == .rightMouseUp {
+            showMenu()
+        } else {
+            handler()
+        }
+    }
+
+    private func showMenu() {
+        guard let button = statusItem?.button else { return }
+        let menu = NSMenu()
+        let settings = NSMenuItem(
+            title: "Settings…", action: #selector(menuShowSettings), keyEquivalent: ""
+        )
+        settings.target = self
+        menu.addItem(settings)
+        menu.addItem(.separator())
+        let quit = NSMenuItem(
+            title: "Quit sys-monitor", action: #selector(menuQuit), keyEquivalent: ""
+        )
+        quit.target = self
+        menu.addItem(quit)
+        menu.popUp(
+            positioning: nil,
+            at: NSPoint(x: 0, y: button.bounds.maxY + 4),
+            in: button
+        )
+    }
+
+    @objc private func menuShowSettings() { onShowSettings() }
+    @objc private func menuQuit() { NSApp.terminate(nil) }
 }

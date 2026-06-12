@@ -360,8 +360,19 @@ struct PanelRootView: View {
         if searchText.isEmpty {
             filtered = procs
         } else {
+            // Match the truncated kernel name AND the executable basename
+            // when we have it — `proc_name` clips at ~32 bytes, so the
+            // name a user knows from Activity Monitor may only exist in
+            // the path.
             let needle = searchText.lowercased()
-            filtered = procs.filter { $0.name.lowercased().contains(needle) }
+            filtered = procs.filter { p in
+                if p.name.lowercased().contains(needle) { return true }
+                if let path = pidPath[p.pid] {
+                    return (path as NSString).lastPathComponent
+                        .lowercased().contains(needle)
+                }
+                return false
+            }
         }
         // Sort uses the EMA-smoothed CPU value for ranking so transient
         // 1-tick spikes don't toss processes around. Stable secondary
@@ -568,7 +579,7 @@ private struct ProcessList: View {
                 VStack(spacing: 0) {
                     rowView(for: p)
                     if expandedPids.contains(p.pid) {
-                        ExpandedRow(pid: p.pid, name: p.name, path: pidPath[p.pid])
+                        ExpandedRow(pid: p.pid, path: pidPath[p.pid])
                             .transition(.opacity)
                     }
                 }
@@ -595,7 +606,7 @@ private struct ProcessList: View {
                 }
             }
             .frame(width: 14, height: 14)
-            Text(p.name.isEmpty ? "[pid \(p.pid)]" : p.name)
+            Text(displayName(for: p))
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -639,8 +650,20 @@ private struct ProcessList: View {
         }
     }
 
+    /// Untruncated executable basename when the path cache has it, else
+    /// the kernel's `proc_name` (clipped at ~32 bytes). The cache fills
+    /// lazily after a row's first render, so a name can sharpen one tick
+    /// after appearing — acceptable.
+    private func displayName(for p: ProcSample) -> String {
+        if let path = pidPath[p.pid] {
+            let base = (path as NSString).lastPathComponent
+            if !base.isEmpty { return base }
+        }
+        return p.name.isEmpty ? "[pid \(p.pid)]" : p.name
+    }
+
     private func processRowLabel(for p: ProcSample) -> String {
-        let name = p.name.isEmpty ? "process \(p.pid)" : p.name
+        let name = displayName(for: p)
         let cpu  = String(format: "%.1f", p.cpu * 100)
         let mem  = formatBytes(Double(p.memBytes))
         return "\(name), \(cpu) percent CPU, \(mem), PID \(p.pid)"
@@ -652,8 +675,16 @@ private struct ProcessList: View {
 /// holds no per-process state of its own.
 private struct ExpandedRow: View {
     let pid: Int32
-    let name: String
     let path: String?
+
+    /// Which signal the user is one click away from sending; nil when no
+    /// confirm is pending. Two-step inline confirm instead of a modal —
+    /// a modal on a nonactivating panel is awkward, and the morphing
+    /// button keeps the destructive action under the same cursor.
+    @State private var confirmingSignal: Int32?
+    /// One-line outcome of the last signal attempt ("asked to quit",
+    /// "no permission — command copied", …).
+    @State private var killFeedback: String?
 
     /// Indent aligns the row's content with the parent's name column —
     /// 10pt chevron + the standard inter-cell gap.
@@ -674,15 +705,21 @@ private struct ExpandedRow: View {
                 if NSRunningApplication(processIdentifier: pid) != nil {
                     focusButton(pid: pid)
                 }
-                // Short labels — the verb is the action, "copies to
-                // clipboard" lives in the tooltip. Severity tinting tells
-                // -TERM from -9 at a glance.
-                copyButton(label: "kill -TERM", command: "kill -TERM \(pid)", role: .warn)
-                copyButton(label: "kill -9",    command: "kill -9 \(pid)",    role: .destructive)
+                // Real signals, two-step confirm. Severity tinting tells
+                // Terminate from Force Kill at a glance. On EPERM the
+                // action falls back to copying the shell command (the
+                // pre-v2 behavior) with an explanation.
+                killButton(label: "Terminate",  sig: SIGTERM, role: .warn)
+                killButton(label: "Force Kill", sig: SIGKILL, role: .destructive)
                 if let p = path {
                     copyButton(label: "path", command: p, role: .neutral)
                 }
                 Spacer()
+            }
+            if let feedback = killFeedback {
+                Text(feedback)
+                    .font(DesignTokens.numericFont(size: 10))
+                    .foregroundStyle(.secondary)
             }
         }
         .padding(.leading, leadingIndent)
@@ -726,6 +763,75 @@ private struct ExpandedRow: View {
                 .lineLimit(1)
                 .font(font)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    /// Two-step kill: first click arms ("really?"), second click within
+    /// 3 s sends the signal. The signal path never does blocking IPC on
+    /// the main thread — `kill(2)` is a plain syscall, and
+    /// `NSRunningApplication.terminate()` is used ONLY for `.regular`
+    /// apps (the polite quit-AppleEvent path); faceless system agents
+    /// get the raw signal. That restriction is the FB-1 lesson: AppKit
+    /// process IPC against non-activatable agents can hang the main
+    /// thread, and a frozen widget is worse than a blunt signal.
+    private func killButton(label: String, sig: Int32, role: ButtonRole) -> some View {
+        let confirming = confirmingSignal == sig
+        return Button(action: {
+            if confirming {
+                confirmingSignal = nil
+                performKill(sig)
+            } else {
+                confirmingSignal = sig
+                killFeedback = nil
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                    if confirmingSignal == sig { confirmingSignal = nil }
+                }
+            }
+        }) {
+            Text(confirming ? "really?" : label)
+                .font(DesignTokens.numericFont(size: 10))
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(confirming ? Color.red.opacity(0.35) : roleFill(role))
+                )
+        }
+        .buttonStyle(.plain)
+        .help(sig == SIGTERM ? "Ask the process to quit (SIGTERM)"
+                             : "Force kill immediately (SIGKILL)")
+    }
+
+    private func performKill(_ sig: Int32) {
+        // Pid-reuse guard: if the executable path changed since this row
+        // was expanded, the pid was recycled — never signal a stranger.
+        // Only enforceable when BOTH paths resolve; a process whose path
+        // was unreadable at expand time gets no protection beyond the 3 s
+        // confirm window (pids ascend, so reuse inside it is negligible).
+        if let cached = path,
+           let current = ProcessIntrospection.executablePath(for: pid),
+           current != cached {
+            killFeedback = "process changed — nothing sent"
+            return
+        }
+        if sig == SIGTERM,
+           let app = NSRunningApplication(processIdentifier: pid),
+           app.activationPolicy == .regular {
+            _ = app.terminate()
+            killFeedback = "asked to quit"
+            return
+        }
+        if kill(pid, sig) == 0 {
+            killFeedback = sig == SIGKILL ? "killed" : "terminated"
+        } else if errno == EPERM {
+            let cmd = "kill \(sig == SIGKILL ? "-9" : "-TERM") \(pid)"
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            pb.setString(cmd, forType: .string)
+            killFeedback = "no permission — `\(cmd)` copied for sudo"
+        } else {
+            killFeedback = "already gone"
         }
     }
 
