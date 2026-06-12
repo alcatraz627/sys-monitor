@@ -460,7 +460,10 @@ public struct GlyphRenderer {
     /// Output examples:
     ///   "  1KB"  " 12KB"  "999KB"  "1.0MB"  " 99MB"  "999MB"
     ///   "1.0GB"  " 10GB"  "999GB"  "     "  "    —"
-    private static func formatBps(_ v: Double) -> String {
+    // Internal, not private: the panel's throughput cells reuse this
+    // exact grammar (plus a "/s" suffix) so both surfaces stay
+    // width-stable and read identically.
+    static func formatBps(_ v: Double) -> String {
         if v < 0    { return "    —" }     // measuring / unavailable
         if v < 50   { return "     " }     // truly zero — let the arrow opacity speak
         if v < 1024 { return "  1KB" }     // sub-KB clamps to 1KB

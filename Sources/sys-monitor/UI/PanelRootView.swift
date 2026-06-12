@@ -37,6 +37,10 @@ struct PanelRootView: View {
     @State private var triedLookup: Set<Int32> = []
     @State private var pidPath: [Int32: String] = [:]
     @State private var pidIcon: [Int32: NSImage] = [:]
+    /// Resolved human display name per pid (localizedName → meaningful
+    /// path segment → proc_name). Filled in the same once-per-pid task
+    /// as the path/icon lookups.
+    @State private var pidDisplayName: [Int32: String] = [:]
 
     let onShowSettings: () -> Void
 
@@ -76,8 +80,13 @@ struct PanelRootView: View {
                 Text("CPU").font(DesignTokens.numericFont(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
+                // The header value is where "now" gets its color — the
+                // sparkline trace stays neutral (history is shape).
+                // Default text color while normal; orange/red at the
+                // same thresholds the bars use.
                 Text(cpuValueText)
                     .font(DesignTokens.numericFont(size: 12, weight: .medium))
+                    .foregroundStyle(cpuLoad >= 0.60 ? DesignTokens.loadColor(cpuLoad) : Color.primary)
             }
             // Sparkline carries "now + recent"; the per-core strip carries
             // distribution. The overall bar was a third encoding of "now"
@@ -95,11 +104,15 @@ struct PanelRootView: View {
                 Spacer()
                 Text(memValueText)
                     .font(DesignTokens.numericFont(size: 12, weight: .medium))
+                    .foregroundStyle(memLoad >= 0.60 ? DesignTokens.loadColor(memLoad) : Color.primary)
             }
             // Auto-scale because memory sits in a narrow band; minSpan
             // keeps the trace from amplifying single-percent jitter.
+            // Range labels because auto-scale renders a 2% wobble with
+            // the same shape CPU uses for 0–100%.
             GraphView(buffer: store.snapshot.memHistory,
-                      scaleMode: .auto(minSpan: 0.05))
+                      scaleMode: .auto(minSpan: 0.05),
+                      showRangeLabels: true)
             HStack(spacing: DesignTokens.Space.m) {
                 Text("swap \(swapText)")
                 Spacer()
@@ -172,7 +185,8 @@ struct PanelRootView: View {
                 expandedPids: $expandedPids,
                 triedLookup: $triedLookup,
                 pidPath: $pidPath,
-                pidIcon: $pidIcon
+                pidIcon: $pidIcon,
+                pidDisplayName: $pidDisplayName
             )
             .onHover { hovering in
                 if hovering {
@@ -261,6 +275,9 @@ struct PanelRootView: View {
         pidIcon.keys
             .filter { !livePids.contains($0) }
             .forEach { pidIcon.removeValue(forKey: $0) }
+        pidDisplayName.keys
+            .filter { !livePids.contains($0) }
+            .forEach { pidDisplayName.removeValue(forKey: $0) }
     }
 
     /// What the process list actually shows: live ranking when not hovered;
@@ -328,7 +345,11 @@ struct PanelRootView: View {
         case .ok(let s):
             let usedGB  = Double(s.usedBytes) / 1_073_741_824
             let totalGB = Double(s.totalBytes) / 1_073_741_824
-            return String(format: "%.1f / %.0f GB", usedGB, totalGB)
+            // Leading % matches CPU's unit and gives the severity color
+            // ramp (keyed on the fraction) a visible numeric anchor.
+            let pct = s.totalBytes > 0
+                ? Double(s.usedBytes) / Double(s.totalBytes) * 100 : 0
+            return String(format: "%.0f%% · %.1f / %.0f GB", pct, usedGB, totalGB)
         case .measuring, .unavailable: return "—"
         }
     }
@@ -367,9 +388,8 @@ struct PanelRootView: View {
             let needle = searchText.lowercased()
             filtered = procs.filter { p in
                 if p.name.lowercased().contains(needle) { return true }
-                if let path = pidPath[p.pid] {
-                    return (path as NSString).lastPathComponent
-                        .lowercased().contains(needle)
+                if let resolved = pidDisplayName[p.pid] {
+                    return resolved.lowercased().contains(needle)
                 }
                 return false
             }
@@ -408,11 +428,15 @@ private struct UsageBar: View {
     var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 3)
+                RoundedRectangle(cornerRadius: 1.5)
                     .fill(Color.secondary.opacity(0.18))
-                RoundedRectangle(cornerRadius: 3)
+                RoundedRectangle(cornerRadius: 1.5)
+                    // No minimum fill width: an idle core must read as
+                    // EMPTY, not as a pebble indistinguishable from a few
+                    // percent of load. The tighter radius keeps small
+                    // fills bar-shaped instead of blob-shaped.
                     .fill(DesignTokens.loadColor(load))
-                    .frame(width: max(1, geo.size.width * CGFloat(min(max(load, 0), 1))))
+                    .frame(width: geo.size.width * CGFloat(min(max(load, 0), 1)))
                     // GPU-side interpolation on width — cheap, smooths the
                     // 1Hz tick edges into a continuous-looking bar.
                     .animation(.easeInOut(duration: 0.35), value: load)
@@ -440,8 +464,12 @@ private struct CoreStrip: View {
     }
 
     private func stripLayout(loads: [Double], placeholder: Bool) -> some View {
-        let perRow = 9
-        let display = Array(loads.prefix(perRow * 3))    // 3 rows max
+        // Balanced rows instead of a hardcoded 9-per-row: a 10-core Mac
+        // gets 5+5, not 9+1, and core counts beyond 27 still lay out
+        // (3 rows of however many fit) instead of being silently cut.
+        let rowCount = loads.count <= 9 ? 1 : (loads.count <= 18 ? 2 : 3)
+        let perRow = Int((Double(loads.count) / Double(rowCount)).rounded(.up))
+        let display = loads
         let rows: [[Double]] = stride(from: 0, to: display.count, by: perRow).map {
             Array(display[$0..<min($0 + perRow, display.count)])
         }
@@ -530,6 +558,7 @@ private struct ProcessList: View {
     @Binding var triedLookup: Set<Int32>
     @Binding var pidPath: [Int32: String]
     @Binding var pidIcon: [Int32: NSImage]
+    @Binding var pidDisplayName: [Int32: String]
 
     var body: some View {
         ScrollView {
@@ -539,7 +568,9 @@ private struct ProcessList: View {
             case .unavailable:
                 unavailableView
             case .ok:
-                listView
+                // Trailing gutter keeps the overlay scrollbar off the PID
+                // column — an occluded pid is a mis-typed kill target.
+                listView.padding(.trailing, 10)
             }
         }
         .frame(height: 200)
@@ -634,32 +665,70 @@ private struct ProcessList: View {
         .accessibilityLabel(processRowLabel(for: p))
         .accessibilityHint("Double tap to expand")
         .task(id: p.pid) {
-            // Look up path + icon once per pid. Both lookups are cheap
+            // Look up path + icon + display name once per pid. All cheap
             // (proc_pidpath is one syscall; NSWorkspace caches icons
             // internally), but we still avoid repeating them on every
             // render by stamping `triedLookup`.
             if !triedLookup.contains(p.pid) {
                 triedLookup.insert(p.pid)
-                if let path = ProcessIntrospection.executablePath(for: p.pid) {
+                let path = ProcessIntrospection.executablePath(for: p.pid)
+                if let path {
                     pidPath[p.pid] = path
                     if let icon = ProcessIntrospection.appIcon(for: path) {
                         pidIcon[p.pid] = icon
                     }
                 }
+                pidDisplayName[p.pid] = Self.resolveDisplayName(
+                    pid: p.pid, procName: p.name, path: path
+                )
             }
         }
     }
 
-    /// Untruncated executable basename when the path cache has it, else
-    /// the kernel's `proc_name` (clipped at ~32 bytes). The cache fills
-    /// lazily after a row's first render, so a name can sharpen one tick
-    /// after appearing — acceptable.
+    /// Resolved name from the per-pid cache, else the kernel's
+    /// `proc_name` (clipped at ~32 bytes). The cache fills lazily after
+    /// a row's first render, so a name can sharpen one tick after
+    /// appearing — acceptable.
     private func displayName(for p: ProcSample) -> String {
-        if let path = pidPath[p.pid] {
-            let base = (path as NSString).lastPathComponent
-            if !base.isEmpty { return base }
-        }
+        if let resolved = pidDisplayName[p.pid] { return resolved }
         return p.name.isEmpty ? "[pid \(p.pid)]" : p.name
+    }
+
+    /// Best human name for a process, in preference order: the app's
+    /// localized name (covers every NSRunningApplication, including
+    /// helpers), then the executable basename — UNLESS that basename is
+    /// a bare version string ("2.1.162"), the artifact of binaries that
+    /// live inside versioned framework directories, in which case walk
+    /// up the path past structural segments to the first meaningful one.
+    /// `proc_name` is the floor when there's no path at all.
+    static func resolveDisplayName(pid: Int32, procName: String, path: String?) -> String {
+        if let app = NSRunningApplication(processIdentifier: pid),
+           let localized = app.localizedName, !localized.isEmpty {
+            return localized
+        }
+        let fallback = procName.isEmpty ? "[pid \(pid)]" : procName
+        guard let path else { return fallback }
+        let base = (path as NSString).lastPathComponent
+        if !base.isEmpty && !isVersionLike(base) { return base }
+
+        let structural: Set<String> = [
+            "MacOS", "Contents", "Versions", "Frameworks", "Helpers",
+            "Resources", "Current", "A", "bin", "sbin", "libexec", "usr",
+        ]
+        for component in path.split(separator: "/").reversed().dropFirst() {
+            let s = String(component)
+            if structural.contains(s) || isVersionLike(s) { continue }
+            return s
+                .replacingOccurrences(of: ".app", with: "")
+                .replacingOccurrences(of: ".framework", with: "")
+                .replacingOccurrences(of: ".xpc", with: "")
+        }
+        return fallback
+    }
+
+    /// "2.1.162", "14", "1.0" — digits and dots only.
+    private static func isVersionLike(_ s: String) -> Bool {
+        !s.isEmpty && s.allSatisfy { $0.isNumber || $0 == "." }
     }
 
     private func processRowLabel(for p: ProcSample) -> String {
@@ -692,11 +761,28 @@ private struct ExpandedRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
+            // Kill feedback temporarily replaces the path line rather
+            // than appending below it: the path is the least useful info
+            // in the seconds after a kill attempt, and swapping in place
+            // keeps the row height stable (no layout jump under the
+            // cursor). Reverts automatically; a successful kill usually
+            // removes the whole row first anyway.
             HStack(spacing: 4) {
-                Image(systemName: "folder")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-                pathText
+                if let feedback = killFeedback {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                    Text(feedback)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .font(DesignTokens.numericFont(size: 10))
+                        .foregroundStyle(.secondary)
+                } else {
+                    Image(systemName: "folder")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                    pathText
+                }
             }
             HStack(spacing: 5) {
                 // Focus button only renders when macOS classifies the pid
@@ -716,19 +802,16 @@ private struct ExpandedRow: View {
                 }
                 Spacer()
             }
-            if let feedback = killFeedback {
-                Text(feedback)
-                    .font(DesignTokens.numericFont(size: 10))
-                    .foregroundStyle(.secondary)
-            }
         }
         .padding(.leading, leadingIndent)
         .padding(.vertical, 5)
         .padding(.trailing, DesignTokens.Space.s)
         // Stronger contrast than secondary@0.06 so the expanded row reads
         // as a contained sub-surface, not as a same-row continuation.
+        // Semantic recessed color, not hardcoded black — adapts to light
+        // mode where a black wash would read as a stain.
         .background(
-            Color.black.opacity(0.18)
+            Color(nsColor: .underPageBackgroundColor).opacity(0.55)
                 .overlay(alignment: .top) {
                     Rectangle()
                         .fill(Color.secondary.opacity(0.30))
@@ -789,14 +872,22 @@ private struct ExpandedRow: View {
                 }
             }
         }) {
-            Text(confirming ? "really?" : label)
-                .font(DesignTokens.numericFont(size: 10))
-                .padding(.horizontal, 7)
-                .padding(.vertical, 3)
-                .background(
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(confirming ? Color.red.opacity(0.35) : roleFill(role))
-                )
+            // Width fixed to the widest of the two states so the morph
+            // to "really?" never shifts the NEIGHBORING button under a
+            // stationary cursor — that geometry would turn a double-click
+            // into a misdirected destructive click.
+            ZStack {
+                Text(label).hidden()
+                Text("really?").hidden()
+                Text(confirming ? "really?" : label)
+            }
+            .font(DesignTokens.numericFont(size: 10))
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(confirming ? Color.red.opacity(0.35) : roleFill(role))
+            )
         }
         .buttonStyle(.plain)
         .help(sig == SIGTERM ? "Ask the process to quit (SIGTERM)"
@@ -813,6 +904,7 @@ private struct ExpandedRow: View {
            let current = ProcessIntrospection.executablePath(for: pid),
            current != cached {
             killFeedback = "process changed — nothing sent"
+            scheduleFeedbackRevert()
             return
         }
         if sig == SIGTERM,
@@ -820,6 +912,7 @@ private struct ExpandedRow: View {
            app.activationPolicy == .regular {
             _ = app.terminate()
             killFeedback = "asked to quit"
+            scheduleFeedbackRevert()
             return
         }
         if kill(pid, sig) == 0 {
@@ -832,6 +925,17 @@ private struct ExpandedRow: View {
             killFeedback = "no permission — `\(cmd)` copied for sudo"
         } else {
             killFeedback = "already gone"
+        }
+        scheduleFeedbackRevert()
+    }
+
+    /// The feedback line borrows the path line's slot — give the slot
+    /// back after a few seconds.
+    private func scheduleFeedbackRevert() {
+        let shown = killFeedback
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            if killFeedback == shown { killFeedback = nil }
         }
     }
 
@@ -892,14 +996,14 @@ private struct ExpandedRow: View {
 
 // MARK: - Formatting helpers
 
+// Width-stable throughput text: the glyph's 5-char value grammar plus
+// "/s", so panel numbers stop jittering sideways every tick. The one
+// divergence: the glyph renders zero as blank (its arrow opacity speaks
+// for it); the panel has no second channel, so zero shows explicitly.
 private func formatBps(_ bps: Double) -> String {
-    let neg = bps < 0
-    let v = abs(bps)
-    let s: String
-    if v >= 1_048_576      { s = String(format: "%.1f MB/s", v / 1_048_576) }
-    else if v >= 1_024     { s = String(format: "%.0f KB/s", v / 1_024) }
-    else                   { s = String(format: "%.0f B/s",  v) }
-    return neg ? "—" : s
+    if bps < 0  { return "—" }
+    if bps < 50 { return "  0KB/s" }
+    return GlyphRenderer.formatBps(bps) + "/s"
 }
 
 private func formatBytes(_ bytes: Double) -> String {

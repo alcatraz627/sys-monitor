@@ -5,10 +5,10 @@ import SwiftUI
 /// per-tick redraw without the framework overhead — a ~60-point Path is
 /// microseconds of work per update and adds essentially nothing to RSS.
 ///
-/// The line color is the load color at the most-recent value, so a graph
-/// that's currently elevated draws orange, currently hot draws red — the
-/// graph itself communicates the same state as the bar without needing a
-/// separate legend.
+/// The trace is deliberately neutral: history is SHAPE, not color. A
+/// trace tinted by the current value paints past samples with present
+/// state (a spike from 30 s ago rendered green because now is calm) —
+/// the "now" signal lives in the section header's tinted value instead.
 struct GraphView: View {
 
     /// How the graph maps values to vertical space.
@@ -27,15 +27,24 @@ struct GraphView: View {
     let buffer: RingBuffer
     let height: CGFloat
     let scaleMode: ScaleMode
+    /// Show the resolved min/max as tiny corner labels. Auto-scaled
+    /// graphs need this: auto-zoom renders a 2% wobble with the same
+    /// full-frame shape a fixed graph uses for 0–100%, and with a
+    /// neutral trace, shape is the only history channel — the labels
+    /// are what keep the two graphs from teaching contradictory
+    /// readings.
+    let showRangeLabels: Bool
 
     init(
         buffer: RingBuffer,
         height: CGFloat = 26,
-        scaleMode: ScaleMode = .fixed(0...1)
+        scaleMode: ScaleMode = .fixed(0...1),
+        showRangeLabels: Bool = false
     ) {
         self.buffer = buffer
         self.height = height
         self.scaleMode = scaleMode
+        self.showRangeLabels = showRangeLabels
     }
 
     var body: some View {
@@ -78,12 +87,22 @@ struct GraphView: View {
             area.addLine(to: CGPoint(x: xFor(pts.first!.timestamp), y: size.height))
             area.closeSubpath()
 
-            // Line carries the load-color signal; area is a thin wash so
-            // a long full-color region doesn't read as if the metric were
-            // pinned at max. Alpha kept low on purpose.
-            let color = DesignTokens.loadColor(pts.last?.value ?? 0)
+            // Neutral trace + thin wash — see the type comment for why
+            // this is not the current load color.
+            let color = Color.secondary
             ctx.fill(area, with: .color(color.opacity(0.10)))
-            ctx.stroke(line, with: .color(color), lineWidth: 1.4)
+            ctx.stroke(line, with: .color(color.opacity(0.9)), lineWidth: 1.4)
+
+            if showRangeLabels {
+                let font = Font.system(size: 8, design: .monospaced)
+                let labelColor = Color.secondary.opacity(0.7)
+                let hi = Text(String(format: "%.0f%%", valueRange.upperBound * 100))
+                    .font(font).foregroundColor(labelColor)
+                let lo = Text(String(format: "%.0f%%", valueRange.lowerBound * 100))
+                    .font(font).foregroundColor(labelColor)
+                ctx.draw(hi, at: CGPoint(x: 3, y: 5), anchor: .leading)
+                ctx.draw(lo, at: CGPoint(x: 3, y: size.height - 5), anchor: .leading)
+            }
         }
         .frame(height: height)
         .background(
