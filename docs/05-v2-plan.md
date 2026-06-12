@@ -89,6 +89,73 @@ The feature slots, gated on Phases 1–3 landing first.
 | 4.3 | **"Unaccounted/other" row in the process list.** Without root, kernel_task and other-uid processes are invisible; don't pretend the visible list sums to 100%. | research rec 7 | small |
 | 4.4 | **Self-cost surface.** Show our own CPU% (we already enumerate ourselves) and idle wakeups in the panel footer or a settings debug row. htop shows itself; iStat Menus markets self-cost as a feature. Doubles as the budget regression canary: the monitor entering its own top-5 is a release blocker, and this makes that visible without Activity Monitor. | research rec 12 | small |
 
+## Phase 4.5 — Pinning + UI sprint (user-requested, post-Phase-4)
+
+| # | Item | Notes | Size |
+|---|------|-------|------|
+| 4.5.1 | **Pin the panel open.** A pin toggle in the panel header: when pinned, click-outside, Esc, and Space-change dismissal are disabled — only clicking the menu-bar icon (or unpinning) closes it. Interaction spec to settle at implementation, with drills: (a) pinned + occluded (Space switch / fullscreen app) should DEMOTE to idle tier without dismissing — the original README occlusion intent finally lands here — and re-promote when visible again; (b) pinned panel must not block screen-lock suspension (2.4 wins); (c) pin state persists across close/reopen? Recommend: no — pin is a session gesture, not a setting; revisit if usage says otherwise. | new `isPinned` in PanelController gating the three dismissal channels; occlusion handler branches demote-vs-close | ~40 lines + drill |
+| 4.5.2 | **UI improvement sprint.** Screenshot-driven pass over the panel + settings with the designer-reviewer flow: visual hierarchy, spacing rhythm, section dividers, expanded-row layout (it now carries 4 buttons + feedback line), settings window structure (growing — see backlog below), dark/light contrast audit, motion (Reduce-Motion honored — overlaps the NFR-9 deferral). Scope rule from this plan still applies: changes ship only with a usability rationale, but this sprint is the sanctioned place for visual-quality work. | run /designer-reviewer per screen; fixes batched | one session |
+
+## Feature backlog (curated 2026-06-12, user-requested brainstorm)
+
+Recommended — high payoff, fits the tool's identity (glanceable +
+actionable, cheap always-on):
+
+- **Watch a process**: pin a specific process row to the top of the list
+  regardless of rank (the natural companion to hover-freeze and kill —
+  "I'm watching THIS one"). Cheap: a pinned-pids set + sort override.
+- **Battery / power cell**: battery %, charging state, and (Apple
+  Silicon) watts via the public `IOPSCopyPowerSourcesInfo` — cheap,
+  public API, huge glance value on MacBooks. Bar cell + panel row.
+- **Threshold alerts**: optional notification when CPU > X% or memory
+  pressure ≥ warn for N consecutive ticks (`UNUserNotificationCenter`).
+  The monitor already has the data; this makes it useful while hidden.
+  Settings-gated, default off.
+- **Disk space row**: free/total via `statfs` — one syscall, panel-only.
+- **Load average + uptime footer line**: `sysctl vm.loadavg` — trivial,
+  htop heritage.
+
+Worth considering, second tier:
+
+- **Glyph tooltip with top consumer** (hover the menu-bar item → "top:
+  chrome 84%") — uses existing accessibility string plumbing.
+- **Per-interface network breakdown** in the panel (Wi-Fi vs VPN vs USB)
+  — the sampler already walks per-interface records and discards the
+  split.
+- **Global hotkey to toggle the panel** — pairs with Esc; needs the
+  Carbon hotkey API or MASShortcut-style code, no third-party deps rule
+  applies.
+- **Copy stats snapshot** (one keystroke → current readings as text).
+
+Rejected, with reasons (consistent with the research triage):
+
+- SMC temperatures (per-SoC key churn, up to half of stats' self-CPU).
+- Public-IP / ping / speedtest widgets (network tools, not system
+  monitoring; external traffic from a monitor is a smell).
+- Menu-bar graphs/sparklines in the glyph (width cost on the bar
+  contradicts the fixed-width grammar the bar v2 design settled).
+
+## Settings backlog (curated 2026-06-12)
+
+Recommended:
+
+- **NET unit preference: bytes/s vs bits/s** — network people think in
+  Mbps; one formatter branch.
+- **Severity thresholds per metric** (CPU warn/crit, MEM warn/crit) —
+  the colors are currently hardcoded at 0.60/0.85 and 0.75/0.92; expose
+  them with sane bounds.
+- **History window length** (60 s ↔ 300 s) — RingBuffer already takes
+  `windowSeconds`.
+- **Bar cell order** — `BarCells.ordered` is currently fixed
+  CPU>MEM>NET>DISK; expose drag-to-reorder in settings (OptionSet must
+  become an ordered array — small persistence migration).
+- **Alert thresholds** (with the alerts feature above).
+- **Reset to defaults** button.
+
+Second tier: compact glyph mode (icon+bar only, no numbers); per-core
+strip on/off; sparklines on/off; "show unaccounted row" toggle (pairs
+with 4.3); pin-by-default (only if 4.5.1 usage demands it).
+
 ## Phase 5 — Hygiene
 
 - Re-enable the test target (`Package.swift:12-13` commented out — RateMath's
