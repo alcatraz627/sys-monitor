@@ -15,6 +15,12 @@ public struct MetricsSnapshot: Sendable, Equatable {
     public var disk: Metric<Throughput>
     public var cpuHistory: RingBuffer
     public var memHistory: RingBuffer
+    /// Whether per-process network counters are available (the private
+    /// NetworkStatistics framework resolved). Drives whether the panel
+    /// offers a Network sort. Constant for a session; carried on the
+    /// snapshot so the UI reads it through the one channel it already
+    /// observes.
+    public var perProcessNetAvailable: Bool = false
 
     public static func == (a: MetricsSnapshot, b: MetricsSnapshot) -> Bool {
         a.generation == b.generation
@@ -48,4 +54,8 @@ public struct ProcSample: Sendable, Equatable {
     /// Bytes/sec of disk I/O (read + written). 0 for pids whose rusage
     /// is denied (other users) — they rank last in a disk sort.
     public let diskBps: Double
+    /// Bytes/sec of network I/O (rx + tx) from the per-process network
+    /// monitor. 0 when the monitor is unavailable or the pid has no
+    /// tracked flows.
+    public let netBps: Double
 }

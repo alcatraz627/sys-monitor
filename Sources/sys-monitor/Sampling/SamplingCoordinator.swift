@@ -31,6 +31,7 @@ public final class SamplingCoordinator: @unchecked Sendable {
     private let netSampler  = NetworkSampler()
     private let diskSampler = DiskSampler()
     private let procSampler = ProcessSampler()
+    private let netMonitor = PerProcessNetworkMonitor()
 
     // MARK: - Serial-queue-isolated state
 
@@ -65,6 +66,7 @@ public final class SamplingCoordinator: @unchecked Sendable {
     private var prevDisk: DiskCounters?
     private var prevProcCpu: [Int32: UInt64] = [:]
     private var prevProcDisk: [Int32: UInt64] = [:]
+    private var prevProcNet: [Int32: UInt64] = [:]
     private var prevTickTime: TimeInterval = 0
     /// Cadence that was in force when `prevTickTime` was stamped. The gap
     /// test must judge the elapsed interval against the cadence it was
@@ -290,12 +292,17 @@ public final class SamplingCoordinator: @unchecked Sendable {
         prevPerCore = nil
         prevProcCpu.removeAll(keepingCapacity: true)
         prevProcDisk.removeAll(keepingCapacity: true)
+        prevProcNet.removeAll(keepingCapacity: true)
 
         // Generous leeway on the idle tier: nothing about the glyph needs
         // sub-second precision, and the rate math divides by measured
         // elapsed, so accuracy is unaffected. Apple's floor is 10% of the
         // interval; the wider window lets the kernel coalesce our wakeup
         // with others.
+        // Per-process network monitoring is open-tier only — stop the
+        // NStat query timer when the panel closes.
+        netMonitor.stop()
+
         startTimer(
             cadence: idleCadenceSeconds,
             leeway: max(0.05, idleCadenceSeconds * 0.1),
@@ -320,6 +327,12 @@ public final class SamplingCoordinator: @unchecked Sendable {
         prevPerCore = nil
         prevProcCpu.removeAll(keepingCapacity: true)
         prevProcDisk.removeAll(keepingCapacity: true)
+        prevProcNet.removeAll(keepingCapacity: true)
+
+        // Per-process network counters are only worth their cost while
+        // the process list is visible — start the NStat query timer with
+        // the open tier.
+        netMonitor.start()
 
         // Open tier keeps a tight leeway — the panel is on screen and
         // visual liveness is the point while it's open.
@@ -371,6 +384,7 @@ public final class SamplingCoordinator: @unchecked Sendable {
         prevDisk = nil
         prevProcCpu.removeAll(keepingCapacity: true)
         prevProcDisk.removeAll(keepingCapacity: true)
+        prevProcNet.removeAll(keepingCapacity: true)
         prevTickTime = 0
         prevTickCadence = 0
         lastProcSampleTime = 0
@@ -558,17 +572,24 @@ public final class SamplingCoordinator: @unchecked Sendable {
         do { raws = try procSampler.read() } catch {
             prevProcCpu.removeAll(keepingCapacity: true)
         prevProcDisk.removeAll(keepingCapacity: true)
+        prevProcNet.removeAll(keepingCapacity: true)
             lastProcSampleTime = 0
             return .unavailable
         }
         lastProcSampleTime = now
 
+        // Per-pid cumulative network bytes from the private-framework
+        // monitor (empty when it's unavailable). Snapshot once per tick.
+        let netByPid = netMonitor.cumulativeBytesByPid()
+
         // Build the next prev maps regardless, so the next tick can
         // delta even if this one returns `.measuring`.
         var nextPrevCpu: [Int32: UInt64] = [:]
         var nextPrevDisk: [Int32: UInt64] = [:]
+        var nextPrevNet: [Int32: UInt64] = [:]
         nextPrevCpu.reserveCapacity(raws.count)
         nextPrevDisk.reserveCapacity(raws.count)
+        nextPrevNet.reserveCapacity(raws.count)
 
         var samples: [ProcSample] = []
         samples.reserveCapacity(raws.count)
@@ -581,6 +602,8 @@ public final class SamplingCoordinator: @unchecked Sendable {
         for raw in raws {
             nextPrevCpu[raw.pid] = raw.cpuTimeNs
             nextPrevDisk[raw.pid] = raw.diskBytes
+            let netCumulative = netByPid[raw.pid] ?? 0
+            nextPrevNet[raw.pid] = netCumulative
             if canCompute, let prevNs = prevProcCpu[raw.pid], raw.cpuTimeNs >= prevNs {
                 // Δns CPU-time / Δns wall-clock = fraction of one core,
                 // matching Activity Monitor's convention (can exceed 1.0
@@ -590,17 +613,23 @@ public final class SamplingCoordinator: @unchecked Sendable {
                 if let prevDisk = prevProcDisk[raw.pid], raw.diskBytes >= prevDisk {
                     diskBps = Double(raw.diskBytes - prevDisk) / elapsed
                 }
+                var netBps = 0.0
+                if let prevNet = prevProcNet[raw.pid], netCumulative >= prevNet {
+                    netBps = Double(netCumulative - prevNet) / elapsed
+                }
                 samples.append(ProcSample(
                     pid: raw.pid,
                     name: raw.name,
                     cpu: cpu,
                     memBytes: raw.residentBytes,
-                    diskBps: diskBps
+                    diskBps: diskBps,
+                    netBps: netBps
                 ))
             }
         }
         prevProcCpu = nextPrevCpu
         prevProcDisk = nextPrevDisk
+        prevProcNet = nextPrevNet
 
         if !canCompute { return .measuring }
         return .ok(samples)
@@ -634,7 +663,8 @@ public final class SamplingCoordinator: @unchecked Sendable {
             net: net,
             disk: disk,
             cpuHistory: cpuHistory,
-            memHistory: memHistory
+            memHistory: memHistory,
+            perProcessNetAvailable: netMonitor.isAvailable
         )
         // The hop is an unordered Task — under main-thread starvation two
         // ticks' publishes can land out of order, so never let an older

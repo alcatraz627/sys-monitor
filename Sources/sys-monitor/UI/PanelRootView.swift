@@ -231,11 +231,14 @@ struct PanelRootView: View {
                     Text("CPU").tag(SettingsStore.ProcSort.cpu)
                     Text("MEM").tag(SettingsStore.ProcSort.mem)
                     Text("DISK").tag(SettingsStore.ProcSort.disk)
+                    if store.snapshot.perProcessNetAvailable {
+                        Text("NET").tag(SettingsStore.ProcSort.net)
+                    }
                 }
                 .pickerStyle(.segmented)
                 .controlSize(.mini)
-                .frame(width: 124)
-                .explain("Rank by CPU, memory, or disk I/O — the third column shows the chosen metric's value")
+                .frame(width: store.snapshot.perProcessNetAvailable ? 156 : 124)
+                .explain("Rank by CPU, memory, disk, or network I/O — the third column shows the chosen metric's value")
             }
             ProcessList(
                 metric: store.snapshot.processes,
@@ -504,6 +507,14 @@ struct PanelRootView: View {
                 if a.cpu     != b.cpu     { return a.cpu     > b.cpu }
                 return a.pid < b.pid
             }
+        case .net:
+            // Same bursty-burst logic as disk — you sort by network to
+            // catch the thing hammering the connection right now.
+            sorted = filtered.sorted { a, b in
+                if a.netBps != b.netBps { return a.netBps > b.netBps }
+                if a.cpu    != b.cpu    { return a.cpu    > b.cpu }
+                return a.pid < b.pid
+            }
         }
         return Array(sorted.prefix(settings.processCount))
     }
@@ -737,11 +748,11 @@ private struct ProcessList: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            // Third column tracks the sort: %CPU normally, the disk rate
-            // when ranked by disk — there's no width for a fourth column
-            // at 360 pt, and the value you sorted by is the one you want
-            // to read.
-            Text(sortBy == .disk ? formatBps(p.diskBps) : String(format: "%.1f%%", p.cpu * 100))
+            // Third column tracks the sort: %CPU normally, or the I/O
+            // rate when ranked by disk/network — there's no width for a
+            // fourth column at 360 pt, and the value you sorted by is the
+            // one you want to read.
+            Text(thirdColumnText(p))
                 .frame(width: 60, alignment: .trailing)
                 .foregroundStyle(sortBy != .mem ? .primary : .secondary)
             Text(formatBytes(Double(p.memBytes)))
@@ -790,11 +801,21 @@ private struct ProcessList: View {
     /// parser below so the help can't drift from what's implemented —
     /// update both together.
     static let filterSyntax =
-        "Filter: name · pid digits · >5:cpu (≥5%) · <300:mem (MB) · >2:disk (MB/s) — cpu is the default metric"
+        "Filter: name · pid digits · >5:cpu (≥5%) · <300:mem (MB) · >2:disk · >1:net (MB/s) — cpu is the default metric"
 
-    /// Parse ">5", "<3:mem", ">2:disk", ">1:CPU" into a predicate, or nil
-    /// when the needle isn't threshold-shaped. Units: cpu in percent,
-    /// mem in MB resident, disk in MB/s. Case-insensitive metric names.
+    /// Third-column value text — whatever metric the list is sorted by.
+    private func thirdColumnText(_ p: ProcSample) -> String {
+        switch sortBy {
+        case .disk: return formatBps(p.diskBps)
+        case .net:  return formatBps(p.netBps)
+        default:    return String(format: "%.1f%%", p.cpu * 100)
+        }
+    }
+
+    /// Parse ">5", "<3:mem", ">2:disk", ">1:net", ">1:CPU" into a
+    /// predicate, or nil when the needle isn't threshold-shaped. Units:
+    /// cpu in percent, mem in MB resident, disk/net in MB/s.
+    /// Case-insensitive metric names.
     static func thresholdFilter(_ raw: String) -> ((ProcSample) -> Bool)? {
         guard let op = raw.first, op == ">" || op == "<" else { return nil }
         let body = raw.dropFirst()
@@ -812,6 +833,9 @@ private struct ProcessList: View {
         case "disk":
             let bps = value * 1_048_576
             return { op == ">" ? $0.diskBps >= bps : $0.diskBps <= bps }
+        case "net":
+            let bps = value * 1_048_576
+            return { op == ">" ? $0.netBps >= bps : $0.netBps <= bps }
         default:
             return nil
         }
