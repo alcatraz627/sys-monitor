@@ -37,12 +37,15 @@ public struct MetricsSnapshot: Sendable, Equatable {
     }
 }
 
-// Placeholder process sample type so MetricsSnapshot compiles before the
-// open-tier process sampler exists. Replaced wholesale when the real one
-// lands; this stub just defines the shape so the snapshot type is stable.
+/// One process's render-ready reading: %CPU and disk throughput are
+/// rates over the last process-sampling window; memory is instantaneous
+/// resident size.
 public struct ProcSample: Sendable, Equatable {
     public let pid: Int32
     public let name: String
     public let cpu: Double
     public let memBytes: UInt64
+    /// Bytes/sec of disk I/O (read + written). 0 for pids whose rusage
+    /// is denied (other users) — they rank last in a disk sort.
+    public let diskBps: Double
 }

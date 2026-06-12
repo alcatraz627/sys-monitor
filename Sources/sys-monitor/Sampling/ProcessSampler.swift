@@ -68,11 +68,27 @@ public struct ProcessSampler: Sampler {
             let name: String = (nameLen > 0) ? String(cString: nameBuf) : ""
 
             let cpuTimeNs = info.pti_total_user &+ info.pti_total_system
+
+            // Lifetime disk bytes via rusage — feeds the per-process disk
+            // rate. Denied (other-user) pids report 0 and simply rank at
+            // the bottom of a disk sort; that's the honest floor without
+            // root.
+            var usage = rusage_info_current()
+            let gotUsage = withUnsafeMutablePointer(to: &usage) { ptr -> Bool in
+                ptr.withMemoryRebound(to: (rusage_info_t?).self, capacity: 1) { reb in
+                    proc_pid_rusage(pid, RUSAGE_INFO_CURRENT, reb) == 0
+                }
+            }
+            let diskBytes = gotUsage
+                ? usage.ri_diskio_bytesread &+ usage.ri_diskio_byteswritten
+                : 0
+
             result.append(ProcRaw(
                 pid: pid,
                 name: name,
                 cpuTimeNs: cpuTimeNs,
-                residentBytes: info.pti_resident_size
+                residentBytes: info.pti_resident_size,
+                diskBytes: diskBytes
             ))
         }
         return result

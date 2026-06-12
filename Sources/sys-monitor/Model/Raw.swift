@@ -48,14 +48,16 @@ public struct NetCounters: Sendable {
 }
 
 /// One raw process reading. `cpuTimeNs` is `pti_total_user + pti_total_system`
-/// in nanoseconds — a monotonically increasing cumulative counter for that
-/// process's lifetime; the coordinator deltas it against wall-clock elapsed
-/// to produce a %CPU. `residentBytes` is instantaneous (`pti_resident_size`).
+/// in nanoseconds and `diskBytes` is lifetime read+written from rusage —
+/// both monotonically increasing cumulative counters the coordinator
+/// deltas against wall-clock elapsed to produce rates. `residentBytes`
+/// is instantaneous (`pti_resident_size`).
 public struct ProcRaw: Sendable {
     public let pid: Int32
     public let name: String
     public let cpuTimeNs: UInt64
     public let residentBytes: UInt64
+    public let diskBytes: UInt64
 }
 
 /// Cumulative byte counters from the IOKit `IOBlockStorageDriver` family,

@@ -64,6 +64,7 @@ public final class SamplingCoordinator: @unchecked Sendable {
     private var prevNet: NetCounters?
     private var prevDisk: DiskCounters?
     private var prevProcCpu: [Int32: UInt64] = [:]
+    private var prevProcDisk: [Int32: UInt64] = [:]
     private var prevTickTime: TimeInterval = 0
     /// Cadence that was in force when `prevTickTime` was stamped. The gap
     /// test must judge the elapsed interval against the cadence it was
@@ -288,6 +289,7 @@ public final class SamplingCoordinator: @unchecked Sendable {
         // elapsed > N×tick).
         prevPerCore = nil
         prevProcCpu.removeAll(keepingCapacity: true)
+        prevProcDisk.removeAll(keepingCapacity: true)
 
         // Generous leeway on the idle tier: nothing about the glyph needs
         // sub-second precision, and the rate math divides by measured
@@ -317,6 +319,7 @@ public final class SamplingCoordinator: @unchecked Sendable {
         // triggers automatically.
         prevPerCore = nil
         prevProcCpu.removeAll(keepingCapacity: true)
+        prevProcDisk.removeAll(keepingCapacity: true)
 
         // Open tier keeps a tight leeway — the panel is on screen and
         // visual liveness is the point while it's open.
@@ -367,6 +370,7 @@ public final class SamplingCoordinator: @unchecked Sendable {
         prevNet = nil
         prevDisk = nil
         prevProcCpu.removeAll(keepingCapacity: true)
+        prevProcDisk.removeAll(keepingCapacity: true)
         prevTickTime = 0
         prevTickCadence = 0
         lastProcSampleTime = 0
@@ -553,40 +557,50 @@ public final class SamplingCoordinator: @unchecked Sendable {
         // whole prev map and the next success re-baselines.
         do { raws = try procSampler.read() } catch {
             prevProcCpu.removeAll(keepingCapacity: true)
+        prevProcDisk.removeAll(keepingCapacity: true)
             lastProcSampleTime = 0
             return .unavailable
         }
         lastProcSampleTime = now
 
-        // Build the next prev-cpu-time map regardless, so the next tick can
+        // Build the next prev maps regardless, so the next tick can
         // delta even if this one returns `.measuring`.
-        var nextPrev: [Int32: UInt64] = [:]
-        nextPrev.reserveCapacity(raws.count)
+        var nextPrevCpu: [Int32: UInt64] = [:]
+        var nextPrevDisk: [Int32: UInt64] = [:]
+        nextPrevCpu.reserveCapacity(raws.count)
+        nextPrevDisk.reserveCapacity(raws.count)
 
         var samples: [ProcSample] = []
         samples.reserveCapacity(raws.count)
 
         // Phase guard: we need a previous reading AND a non-gap elapsed to
-        // compute per-process %CPU.
+        // compute per-process rates.
         let canCompute = !isGap && elapsed > 0 && !prevProcCpu.isEmpty
         let elapsedNs = elapsed * 1_000_000_000
 
         for raw in raws {
-            nextPrev[raw.pid] = raw.cpuTimeNs
+            nextPrevCpu[raw.pid] = raw.cpuTimeNs
+            nextPrevDisk[raw.pid] = raw.diskBytes
             if canCompute, let prevNs = prevProcCpu[raw.pid], raw.cpuTimeNs >= prevNs {
                 // Δns CPU-time / Δns wall-clock = fraction of one core,
                 // matching Activity Monitor's convention (can exceed 1.0
                 // for multi-threaded processes spanning cores).
                 let cpu = Double(raw.cpuTimeNs - prevNs) / elapsedNs
+                var diskBps = 0.0
+                if let prevDisk = prevProcDisk[raw.pid], raw.diskBytes >= prevDisk {
+                    diskBps = Double(raw.diskBytes - prevDisk) / elapsed
+                }
                 samples.append(ProcSample(
                     pid: raw.pid,
                     name: raw.name,
                     cpu: cpu,
-                    memBytes: raw.residentBytes
+                    memBytes: raw.residentBytes,
+                    diskBps: diskBps
                 ))
             }
         }
-        prevProcCpu = nextPrev
+        prevProcCpu = nextPrevCpu
+        prevProcDisk = nextPrevDisk
 
         if !canCompute { return .measuring }
         return .ok(samples)

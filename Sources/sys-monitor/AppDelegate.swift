@@ -136,6 +136,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         distCenter.addObserver(self, selector: #selector(displayCameBack),
                                name: NSNotification.Name("com.apple.screenIsUnlocked"), object: nil)
 
+        // Accessory apps have no visible menu bar, but key equivalents
+        // still route through NSApp.mainMenu — without this hidden Edit
+        // menu, Cmd+A / C / V / X / Z are dead in every text field the
+        // app shows (the panel's filter, settings fields).
+        installHiddenEditMenu()
+
         coordinator.startIdleTier()
 
         // Headless test hook: `SYSMON_TEST_HOOKS=1` + SIGUSR1 toggles the
@@ -160,6 +166,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func systemDidWake() {
         coordinator?.reBaseline()
+    }
+
+    private func installHiddenEditMenu() {
+        let mainMenu = NSMenu()
+        let editHolder = NSMenuItem()
+        mainMenu.addItem(editHolder)
+        let edit = NSMenu(title: "Edit")
+        edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        edit.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
+        edit.addItem(.separator())
+        edit.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editHolder.submenu = edit
+        NSApp.mainMenu = mainMenu
     }
 
     @objc private func displayWentDark() {

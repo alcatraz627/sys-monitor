@@ -230,11 +230,12 @@ struct PanelRootView: View {
                 )) {
                     Text("CPU").tag(SettingsStore.ProcSort.cpu)
                     Text("MEM").tag(SettingsStore.ProcSort.mem)
+                    Text("DISK").tag(SettingsStore.ProcSort.disk)
                 }
                 .pickerStyle(.segmented)
                 .controlSize(.mini)
-                .frame(width: 80)
-                .explain("Rank the list by CPU or memory (ranking uses a smoothed value so rows don't slot-machine)")
+                .frame(width: 124)
+                .explain("Rank by CPU, memory, or disk I/O — the third column shows the chosen metric's value")
             }
             ProcessList(
                 metric: store.snapshot.processes,
@@ -281,7 +282,7 @@ struct PanelRootView: View {
                 .textFieldStyle(.plain)
                 .font(DesignTokens.numericFont(size: 11))
                 .frame(maxWidth: 80)
-                .explain("Filter: name · pid digits · >5:cpu (≥5% CPU) · <300:mem (≤300 MB) — cpu is the default metric")
+                .explain(ProcessList.filterSyntax)
             if !searchText.isEmpty {
                 Button(action: { searchText = "" }) {
                     Image(systemName: "xmark.circle.fill")
@@ -493,6 +494,14 @@ struct PanelRootView: View {
             sorted = filtered.sorted { a, b in
                 if a.memBytes != b.memBytes { return a.memBytes > b.memBytes }
                 if a.cpu      != b.cpu      { return a.cpu      > b.cpu }
+                return a.pid < b.pid
+            }
+        case .disk:
+            // Raw rate, no EMA: disk traffic is bursty by nature and the
+            // user sorting by disk is hunting the burst.
+            sorted = filtered.sorted { a, b in
+                if a.diskBps != b.diskBps { return a.diskBps > b.diskBps }
+                if a.cpu     != b.cpu     { return a.cpu     > b.cpu }
                 return a.pid < b.pid
             }
         }
@@ -728,9 +737,13 @@ private struct ProcessList: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Text(String(format: "%.1f%%", p.cpu * 100))
-                .frame(width: 56, alignment: .trailing)
-                .foregroundStyle(sortBy == .cpu ? .primary : .secondary)
+            // Third column tracks the sort: %CPU normally, the disk rate
+            // when ranked by disk — there's no width for a fourth column
+            // at 360 pt, and the value you sorted by is the one you want
+            // to read.
+            Text(sortBy == .disk ? formatBps(p.diskBps) : String(format: "%.1f%%", p.cpu * 100))
+                .frame(width: 60, alignment: .trailing)
+                .foregroundStyle(sortBy != .mem ? .primary : .secondary)
             Text(formatBytes(Double(p.memBytes)))
                 .frame(width: 64, alignment: .trailing)
                 .foregroundStyle(sortBy == .mem ? .primary : .secondary)
@@ -773,9 +786,15 @@ private struct ProcessList: View {
         }
     }
 
-    /// Parse ">5", "<3:mem", ">1:CPU" into a predicate, or nil when the
-    /// needle isn't threshold-shaped. CPU values are percent; MEM values
-    /// are megabytes of resident memory. Case-insensitive metric names.
+    /// One-line syntax reference for the filter field. Lives next to the
+    /// parser below so the help can't drift from what's implemented —
+    /// update both together.
+    static let filterSyntax =
+        "Filter: name · pid digits · >5:cpu (≥5%) · <300:mem (MB) · >2:disk (MB/s) — cpu is the default metric"
+
+    /// Parse ">5", "<3:mem", ">2:disk", ">1:CPU" into a predicate, or nil
+    /// when the needle isn't threshold-shaped. Units: cpu in percent,
+    /// mem in MB resident, disk in MB/s. Case-insensitive metric names.
     static func thresholdFilter(_ raw: String) -> ((ProcSample) -> Bool)? {
         guard let op = raw.first, op == ">" || op == "<" else { return nil }
         let body = raw.dropFirst()
@@ -790,6 +809,9 @@ private struct ProcessList: View {
         case "mem":
             let bytes = value * 1_048_576
             return { op == ">" ? Double($0.memBytes) >= bytes : Double($0.memBytes) <= bytes }
+        case "disk":
+            let bps = value * 1_048_576
+            return { op == ">" ? $0.diskBps >= bps : $0.diskBps <= bps }
         default:
             return nil
         }

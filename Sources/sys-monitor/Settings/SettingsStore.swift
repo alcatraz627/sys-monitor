@@ -39,9 +39,13 @@ public final class SettingsStore: ObservableObject {
     }
 
     public enum ProcSort: String, CaseIterable, Sendable {
-        case cpu, mem
+        case cpu, mem, disk
         public var displayName: String {
-            switch self { case .cpu: return "CPU"; case .mem: return "Memory" }
+            switch self {
+            case .cpu: return "CPU"
+            case .mem: return "Memory"
+            case .disk: return "Disk I/O"
+            }
         }
     }
 
