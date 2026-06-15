@@ -219,6 +219,46 @@ struct PanelRootView: View {
         return false
     }
 
+    /// A dim pinned row stating, honestly, that the list is a slice — the
+    /// top N of M processes we could attribute, with the rest (and the
+    /// kernel + other-user processes that are invisible without root) not
+    /// shown. This is the truthful "don't pretend the visible list is
+    /// everything" signal. (A literal unaccounted-CPU number was tried and
+    /// dropped: reconciling host-wide CPU against summed per-process
+    /// user+system time leaves ~2 cores of kernel/system time unattributed
+    /// on a quiet machine, which renders as a misleading "kernel 200%"
+    /// next to a 1%-busy list.)
+    @ViewBuilder
+    private var unaccountedRow: some View {
+        if let (shown, total) = coverageCounts, total > shown {
+            HStack(spacing: DesignTokens.Space.s) {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.quaternary)
+                    .frame(width: 10)
+                Text(searchText.isEmpty
+                     ? "top \(shown) of \(total) processes"
+                     : "\(shown) of \(total) matching")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .font(DesignTokens.numericFont(size: 10))
+            .foregroundStyle(.tertiary)
+            .padding(.top, 2)
+            .overlay(alignment: .top) {
+                Rectangle().fill(Color.secondary.opacity(0.15)).frame(height: 0.5)
+            }
+            .explain("The list shows the top processes by the current sort. Kernel and other-user processes are invisible without root, so this is never the whole machine.")
+        }
+    }
+
+    /// (shown, total): how many rows are displayed vs how many processes
+    /// matched the current filter. nil until the first process tick.
+    private var coverageCounts: (Int, Int)? {
+        guard case .ok = store.snapshot.processes else { return nil }
+        let total = filteredProcesses.count
+        return (min(displayedProcesses.count, total), total)
+    }
+
     private var processSection: some View {
         VStack(alignment: .leading, spacing: DesignTokens.Space.xs) {
             HStack(spacing: DesignTokens.Space.s) {
@@ -267,6 +307,7 @@ struct PanelRootView: View {
                     hoverFrozenPids = nil
                 }
             }
+            unaccountedRow
         }
         .onChange(of: store.snapshot.generation) { gen in
             updateSmoothedCpu(generation: gen)
@@ -491,35 +532,34 @@ struct PanelRootView: View {
         return "—"
     }
 
-    private var rankedProcesses: [ProcSample] {
+    /// The current snapshot's processes after the search filter, before
+    /// sort/truncation. Shared by the ranked list and the coverage count.
+    /// Three filter shapes, dispatched on the needle itself:
+    ///   >N / <N, optional :cpu/:mem/:disk/:net — threshold filters
+    ///   digits  pid contains those digits
+    ///   text    case-insensitive name match (kernel + resolved name)
+    private var filteredProcesses: [ProcSample] {
         guard case .ok(let procs) = store.snapshot.processes else { return [] }
-        // Apply the user's search filter first — smaller working set,
-        // cheaper sort.
-        // Three filter shapes, dispatched on the needle itself:
-        //   >N / <N, optional :cpu or :mem suffix — threshold filters
-        //           (cpu in percent, mem in MB; cpu is the default)
-        //   digits  pid contains those digits
-        //   text    case-insensitive name match (kernel name + resolved
-        //           display name — proc_name clips at ~32 bytes, so the
-        //           name a user knows may only exist in the resolved one)
         let raw = searchText.trimmingCharacters(in: .whitespaces)
-        let filtered: [ProcSample]
-        if raw.isEmpty {
-            filtered = procs
-        } else if let threshold = ProcessList.thresholdFilter(raw) {
-            filtered = procs.filter(threshold)
-        } else if raw.allSatisfy({ $0.isNumber }) {
-            filtered = procs.filter { String($0.pid).contains(raw) }
-        } else {
-            let needle = raw.lowercased()
-            filtered = procs.filter { p in
-                if p.name.lowercased().contains(needle) { return true }
-                if let resolved = pidDisplayName[p.pid] {
-                    return resolved.lowercased().contains(needle)
-                }
-                return false
-            }
+        if raw.isEmpty { return procs }
+        if let threshold = ProcessList.thresholdFilter(raw) {
+            return procs.filter(threshold)
         }
+        if raw.allSatisfy({ $0.isNumber }) {
+            return procs.filter { String($0.pid).contains(raw) }
+        }
+        let needle = raw.lowercased()
+        return procs.filter { p in
+            if p.name.lowercased().contains(needle) { return true }
+            if let resolved = pidDisplayName[p.pid] {
+                return resolved.lowercased().contains(needle)
+            }
+            return false
+        }
+    }
+
+    private var rankedProcesses: [ProcSample] {
+        let filtered = filteredProcesses
         // Sort uses the EMA-smoothed CPU value for ranking so transient
         // 1-tick spikes don't toss processes around. Stable secondary
         // tiebreaks on the OTHER metric, then PID, keep order
