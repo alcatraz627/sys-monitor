@@ -203,13 +203,15 @@ struct PanelRootView: View {
     private var netDiskRow: some View {
         HStack(spacing: DesignTokens.Space.m) {
             ThroughputCell(label: "NET", metric: store.snapshot.net,
-                           activity: settings.arrowActivityIndicator)
+                           activity: settings.arrowActivityIndicator,
+                           history: store.snapshot.netHistory)
             // Hide the disk cell entirely when the sampler is permanently
             // unavailable — better than showing empty values forever,
             // which reads as "broken" rather than "doesn't apply on this Mac."
             if !diskUnavailable {
                 ThroughputCell(label: "DISK", metric: store.snapshot.disk,
-                               activity: settings.arrowActivityIndicator)
+                               activity: settings.arrowActivityIndicator,
+                               history: store.snapshot.diskHistory)
             }
         }
     }
@@ -673,15 +675,16 @@ private struct ThroughputCell: View {
     let label: String
     let metric: Metric<Throughput>
     let activity: Bool
+    let history: RingBuffer
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 3) {
             Text(label)
                 .font(DesignTokens.numericFont(size: 10, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .explain(label == "NET"
-                      ? "Network throughput across all interfaces: ↓ received · ↑ sent, per second"
-                      : "Disk throughput across all drives: ↓ read · ↑ written, per second")
+                      ? "Network throughput across all interfaces: ↓ received · ↑ sent, per second. Sparkline = last 60 s of total activity, log-scaled."
+                      : "Disk throughput across all drives: ↓ read · ↑ written, per second. Sparkline = last 60 s of total activity, log-scaled.")
             HStack(spacing: DesignTokens.Space.s) {
                 HStack(spacing: 2) {
                     Text("↓")
@@ -696,6 +699,10 @@ private struct ThroughputCell: View {
                     Text(outText).font(DesignTokens.numericFont(size: 11))
                 }
             }
+            // Log-scaled activity sparkline (history is shape; the numbers
+            // above carry the live colour). Fixed 0…1 — the buffer already
+            // holds the log-normalized fraction.
+            GraphView(buffer: history, height: 16, scaleMode: .fixed(0...1))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

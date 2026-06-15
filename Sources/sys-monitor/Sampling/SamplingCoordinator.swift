@@ -98,6 +98,14 @@ public final class SamplingCoordinator: @unchecked Sendable {
     private var generation: UInt64 = 0
     private var cpuHistory = RingBuffer(windowSeconds: 60)
     private var memHistory = RingBuffer(windowSeconds: 60)
+    // Throughput history is stored as a log-normalized 0…1 fraction (the
+    // same curve the glyph's activity arrows use) so a plain fixed-scale
+    // GraphView renders it log-scaled — net/disk span orders of magnitude,
+    // which a linear sparkline would flatten. One value/tick = total
+    // (in+out) activity. Filled every tick while net/disk are bar-enabled
+    // (full 60 s backstory on open); otherwise fills from panel-open.
+    private var netHistory = RingBuffer(windowSeconds: 60)
+    private var diskHistory = RingBuffer(windowSeconds: 60)
 
     /// Last memory-pressure level read from the kernel; refreshed once per
     /// tick and passed into every memory sample.
@@ -535,7 +543,16 @@ public final class SamplingCoordinator: @unchecked Sendable {
             let inBps  = RateMath.bytesPerSec(prev: prev.inBytes,  now: counters.inBytes,  elapsed: elapsed),
             let outBps = RateMath.bytesPerSec(prev: prev.outBytes, now: counters.outBytes, elapsed: elapsed)
         else { return .measuring }
+        netHistory.append(HistoryPoint(timestamp: now, value: Self.throughputFrac(inBps + outBps)))
         return .ok(Throughput(inPerSec: inBps, outPerSec: outBps))
+    }
+
+    /// Log-normalize bytes/sec into 0…1 for the sparkline. Mirrors the
+    /// glyph's activity-arrow curve: silence → 0, ~10 MB/s → ~1.0.
+    static func throughputFrac(_ bps: Double) -> Double {
+        guard bps >= 100 else { return 0 }
+        let maxLog = log10(10.0 * 1_048_576.0)   // ≈ 7.02
+        return max(0, min(1, log10(bps) / maxLog))
     }
 
     private func readDisk(
@@ -554,6 +571,7 @@ public final class SamplingCoordinator: @unchecked Sendable {
             let rBps = RateMath.bytesPerSec(prev: prev.readBytes,  now: counters.readBytes,  elapsed: elapsed),
             let wBps = RateMath.bytesPerSec(prev: prev.writeBytes, now: counters.writeBytes, elapsed: elapsed)
         else { return .measuring }
+        diskHistory.append(HistoryPoint(timestamp: now, value: Self.throughputFrac(rBps + wBps)))
         return .ok(Throughput(inPerSec: rBps, outPerSec: wBps))
     }
 
@@ -667,6 +685,8 @@ public final class SamplingCoordinator: @unchecked Sendable {
             disk: disk,
             cpuHistory: cpuHistory,
             memHistory: memHistory,
+            netHistory: netHistory,
+            diskHistory: diskHistory,
             perProcessNetAvailable: netMonitor.isAvailable
         )
         // The hop is an unordered Task — under main-thread starvation two

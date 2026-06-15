@@ -15,6 +15,8 @@ public struct MetricsSnapshot: Sendable, Equatable {
     public var disk: Metric<Throughput>
     public var cpuHistory: RingBuffer
     public var memHistory: RingBuffer
+    public var netHistory: RingBuffer
+    public var diskHistory: RingBuffer
     /// Whether per-process network counters are available (the private
     /// NetworkStatistics framework resolved). Drives whether the panel
     /// offers a Network sort. Constant for a session; carried on the
@@ -38,7 +40,9 @@ public struct MetricsSnapshot: Sendable, Equatable {
             net: .measuring,
             disk: .measuring,
             cpuHistory: RingBuffer(windowSeconds: windowSeconds),
-            memHistory: RingBuffer(windowSeconds: windowSeconds)
+            memHistory: RingBuffer(windowSeconds: windowSeconds),
+            netHistory: RingBuffer(windowSeconds: windowSeconds),
+            diskHistory: RingBuffer(windowSeconds: windowSeconds)
         )
     }
 }
