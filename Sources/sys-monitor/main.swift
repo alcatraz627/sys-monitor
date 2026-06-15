@@ -2,11 +2,13 @@ import AppKit
 
 // sys-monitor — entry point.
 //
-// Two modes:
-//   • `--probe`  → run the Phase-1 sampler verification harness (stdout) and
-//                  exit. Lets us validate the CPU/memory/disk samplers from
-//                  the terminal without the menu-bar shell in the way.
-//   • default    → start the menu-bar app (NSApplication).
+// Modes:
+//   • `--self-test` → run the boundary-check suite (RateMath / formatBps) and
+//                     exit 0 on pass, 1 on failure. The regression net for the
+//                     math classes that shipped real bugs; replaces an XCTest
+//                     target (XCTest needs full Xcode, not Command Line Tools).
+//   • `--probe`     → run the Phase-1 sampler verification harness and exit.
+//   • default       → start the menu-bar app (NSApplication).
 //
 // Manual NSApplication bootstrap rather than @main because the SPM executable
 // target needs LSUIElement = YES to suppress the Dock icon, and that lives in
@@ -17,6 +19,10 @@ import AppKit
 // checker for the @MainActor-isolated AppDelegate.init() and runProbe().
 
 MainActor.assumeIsolated {
+    if CommandLine.arguments.contains("--self-test") {
+        exit(runSelfTest())
+    }
+
     if CommandLine.arguments.contains("--probe") {
         runProbe()
         exit(0)

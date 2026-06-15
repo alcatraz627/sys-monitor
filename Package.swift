@@ -9,8 +9,12 @@ import PackageDescription
 // an SPM executable cannot set LSUIElement itself — only a bundled Info.plist
 // can — and a menu-bar app needs LSUIElement to suppress the Dock icon.
 //
-// Tests sit in Tests/ but the target is commented because XCTest ships with
-// full Xcode, not Command Line Tools alone. Re-enable when Xcode is installed.
+// No XCTest target: XCTest ships with full Xcode, not the Command Line Tools
+// this project builds under. The regression suite runs instead as a binary
+// mode — `sys-monitor --self-test` (Sources/sys-monitor/SelfTest.swift),
+// exit 0 on pass / 1 on failure, exercising the real in-target RateMath and
+// formatBps. If full Xcode is ever installed, an XCTest target can wrap the
+// same assertions; until then --self-test is the runnable net.
 let package = Package(
     name: "sys-monitor",
     platforms: [.macOS(.v13)],
