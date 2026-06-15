@@ -3,7 +3,8 @@ import AppKit
 /// One cell of the menu-bar widget.
 /// `cpu` / `mem` render as: icon · horizontal-progress-bar · `XX%`.
 /// `net` / `disk` render as: icon · ↓green-arrow value · ↑red-arrow value.
-/// GPU is planned but its sampler isn't wired yet; the case is reserved.
+/// (GPU/power lives in the panel's POWER row via IOReport, not the bar —
+/// a watts cell would break the bar's fixed-width grammar.)
 public enum BarCell: Sendable, Hashable {
     case cpu, mem, net, disk
 }

@@ -721,7 +721,8 @@ public final class SamplingCoordinator: @unchecked Sendable {
     }
 }
 
-// Wall-clock seconds from a source immune to user clock changes. Same
+// Monotonic seconds (CLOCK_MONOTONIC) — deliberately NOT wall-clock, so a
+// user clock change or NTP step can't corrupt an elapsed interval. Same
 // helper used by the probe so "elapsed" means the same thing everywhere.
 @inline(__always)
 func monoSeconds() -> TimeInterval {

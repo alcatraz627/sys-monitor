@@ -20,15 +20,6 @@ public enum DesignTokens {
         }
     }
 
-    /// AppKit-side variant for the glyph renderer (NSColor parity).
-    public static func nsLoadColor(_ load: Double) -> NSColor {
-        switch load {
-        case ..<0.60: return .systemGreen
-        case ..<0.85: return .systemOrange
-        default:      return .systemRed
-        }
-    }
-
     // MARK: - Spacing
 
     public enum Space {

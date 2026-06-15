@@ -190,11 +190,18 @@ from rate types, and `RateMath` (pure free functions) deltas raw→rate against 
 
 ### 5.3 Memory-pressure source
 
-`DispatchSource.makeMemoryPressureSource(eventMask: [.warning,.critical], queue:
-samplingQueue)` — **runs on the coordinator's own serial queue** so its handler and the
-snapshot builder don't race (review issue 8). Handler latches the last level into a
-coordinator-private `latchedPressure` (default `.normal`); each snapshot reads it on the
-same queue.
+> **Superseded (v2).** The original design here was a
+> `DispatchSource.makeMemoryPressureSource` whose handler latched the level.
+> It was built and then **removed** during v2 verification: macOS delivers
+> warn-level pressure events selectively (largest consumers first), so a
+> small menu-bar process can sit through a whole warn episode without ever
+> receiving the event — the source stayed silent while the kernel read
+> level 2. The shipping implementation polls
+> `kern.memorystatus_vm_pressure_level` once per tick on the coordinator's
+> serial queue (`refreshPressureLevel`) and latches it into `currentPressure`;
+> the sysctl reports the host-wide level unconditionally and is microsecond-
+> cheap. See `SamplingCoordinator.refreshPressureLevel` and the rationale
+> comment there.
 
 ---
 

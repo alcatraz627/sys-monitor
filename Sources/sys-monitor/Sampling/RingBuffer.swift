@@ -11,7 +11,7 @@ import Foundation
 // append. This keeps history length constant under cadence changes (FR-7).
 
 public struct HistoryPoint: Sendable, Equatable {
-    public let timestamp: TimeInterval   // seconds since reference (mach absolute time)
+    public let timestamp: TimeInterval   // monoSeconds() — CLOCK_MONOTONIC, advances across sleep
     public let value: Double             // metric-defined unit (e.g. 0...1 for CPU)
 }
 
