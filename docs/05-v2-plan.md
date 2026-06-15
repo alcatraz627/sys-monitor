@@ -500,14 +500,23 @@ must assert on the tick log's `tier=` field, not on signal count.
   the list). **Human glance: `self 0.X% · NN MB` renders between the gear
   and power icons in the footer.**
 
-### Phase 5 checklist (hygiene)
+### Phase 5 checklist (hygiene) — executed 2026-06-15
 
-- [ ] `swift test` executes the RateMath boundary table locally — including
-  a `UInt32` tick-wrap case that reproduces the `0de4eae` crash class.
-- [ ] rg-sweep: zero comments/docs promising a symbol that doesn't exist
-  (re-check all seven §8 drift items from the audit).
-- [ ] Dead-code removal compiles clean; CoreStrip cap decision recorded in
-  docs.
+- [x] Boundary suite runs and passes — via `sys-monitor --self-test`, NOT
+  `swift test` (XCTest needs full Xcode, absent under Command Line Tools;
+  documented in `Package.swift`). 20 checks incl. the `UInt32` tick-wrap
+  (`0de4eae`) and formatBps-width (`fa31022`) crash classes. Verified both
+  directions: all pass + exit 0; a deliberately-false probe reports the
+  failure + exit 1.
+- [x] rg-sweep clean: the 4 living drift items fixed (monoSeconds
+  "wall-clock"→monotonic; BarCell "reserved GPU case"→panel POWER row;
+  HistoryPoint "mach absolute"→monoSeconds; `docs/03-implementation.md`
+  §5.3 DispatchSource→Superseded/sysctl). MemorySampler's comment was
+  already corrected in Phase 1. The audit reports (06/07) and this plan
+  intentionally record the drift as history — left as-is.
+- [x] Dead `DesignTokens.nsLoadColor` deleted (zero callers); build clean,
+  no warnings. CoreStrip 27-core cap was already resolved in Phase 2
+  (balanced rows, no truncation) — no further action.
 
 ## Sequencing
 
