@@ -468,18 +468,37 @@ user click between signals inverts open/close intent (observed live).
 Drills that depend on panel state need explicit open/close verbs or
 must assert on the tick log's `tier=` field, not on signal count.
 
-### Phase 4 checklist (capability)
+### Phase 4 checklist (capability) — executed 2026-06-15
 
-- [ ] **4.1** `curl` a large file + `dd` a temp file → NET/DISK sparklines
-  show the spike with correct timing; disable the cells → rings still fill
-  on the slow divisor; gaps (if any) render as gaps, not interpolation.
-- [ ] **4.2** IOReport readings cross-checked against a one-shot
-  `sudo powermetrics` sample within reasonable tolerance; mock unknown
-  channel names → adapter degrades to `unavailable`, app keeps running.
-- [ ] **4.3** Under load: visible rows + unaccounted ≈ overall CPU within a
-  few percent.
-- [ ] **4.4** Self-cost row matches `ps -o %cpu` for our pid (±0.5%); idle
-  reads <1%, open-tier <1.4%.
+- [x] **4.1** VERIFIED (data): under a `curl` download the net ring fills
+  every tick and the log-normalized frac tracks rate (3.4 MB/s → 0.93,
+  8.7 MB/s burst → 0.99), staying in 0…1. The "slow idle divisor when not
+  bar-enabled" sub-item was DEFERRED, not shipped — it needs net/disk to
+  carry their own elapsed clock (like `readProcesses`) to avoid stale-prev
+  inflation; backstory currently comes from the bar-enabled idle feed or
+  fills from open. **Human glance: the sparkline renders under each
+  throughput cell.**
+- [x] **4.2** VERIFIED (in-app): IOReport resolves and reports available;
+  idle reads cpu≈5 W / gpu≈0.07 W (matching the standalone probe) and
+  tracks load (cpu 5→8 W under `yes` stress); ANE 0 idle. Cross-check vs
+  `powermetrics` skipped (needs sudo) — the standalone probe validated the
+  absolute values against the energy-counter math instead. Channel-naming
+  drift handled (friendly aggregates only; physical channels excluded to
+  avoid double-count). Degrade-to-unavailable is by construction (every
+  symbol guarded). **Human glance: the POWER row renders.**
+- [x] **4.3** SHIPPED AS PIVOT. The literal "unaccounted ≈ overall − Σ
+  visible" was exercised and REJECTED: on a quiet machine the host-wide
+  busy (~2 cores) minus summed per-process user+system (~0.03 cores) left
+  ~2 cores unattributed (kernel_task + system time), rendering as a
+  misleading "kernel + others 200%". Shipped the honest, can't-look-broken
+  signal instead — a "top N of M processes" coverage row. **Human glance:
+  the dim coverage row shows at the list bottom.**
+- [ ] **4.4** Self-cost: VERIFIED app-computed value is correct and
+  understood (reads ~0.1–0.4% averaged over its 2 s window; `ps` oscillates
+  0.7–6.1% catching the per-tick enumeration bursts — window difference,
+  not a bug; the averaged number is internally consistent with the rest of
+  the list). **Human glance: `self 0.X% · NN MB` renders between the gear
+  and power icons in the footer.**
 
 ### Phase 5 checklist (hygiene)
 
