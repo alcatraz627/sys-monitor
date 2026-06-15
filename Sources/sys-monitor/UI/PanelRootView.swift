@@ -381,8 +381,36 @@ struct PanelRootView: View {
         HStack(spacing: DesignTokens.Space.s) {
             footerButton("gearshape", help: "Settings") { onShowSettings() }
             Spacer()
+            selfCostReadout
+            Spacer()
             footerButton("power", tint: .red, help: "Quit sys-monitor") { NSApp.terminate(nil) }
         }
+    }
+
+    /// The monitor's own footprint — how much CPU/memory sys-monitor itself
+    /// is spending to watch everything else. It's the budget canary: a
+    /// glanceable monitor that becomes a top consumer has failed its one
+    /// promise, so its own cost should be visible, not hidden in Activity
+    /// Monitor. Tints when the cost crosses into "something's wrong"
+    /// territory (we should sit well under 1%).
+    @ViewBuilder
+    private var selfCostReadout: some View {
+        if let s = selfSample {
+            let pct = s.cpu * 100
+            Text(String(format: "self %.1f%% · %@", pct, formatBytes(Double(s.memBytes))))
+                .font(DesignTokens.numericFont(size: 10))
+                .foregroundStyle(pct >= 3 ? DesignTokens.loadColor(pct >= 8 ? 1.0 : 0.7)
+                                          : Color.secondary.opacity(0.7))
+                .explain("sys-monitor's own CPU% and memory — the budget canary. If this climbs into the top processes, the monitor has become the load it's meant to watch.")
+        }
+    }
+
+    /// Our own process's sample, pulled from the full (un-truncated) process
+    /// snapshot. Nil until the first open-tier process tick lands.
+    private var selfSample: ProcSample? {
+        guard case .ok(let procs) = store.snapshot.processes else { return nil }
+        let me = ProcessInfo.processInfo.processIdentifier
+        return procs.first { $0.pid == me }
     }
 
     private func footerButton(_ icon: String, tint: Color = .secondary,
