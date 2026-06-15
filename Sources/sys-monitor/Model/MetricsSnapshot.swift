@@ -13,6 +13,7 @@ public struct MetricsSnapshot: Sendable, Equatable {
     public var processes: Metric<[ProcSample]>
     public var net: Metric<Throughput>
     public var disk: Metric<Throughput>
+    public var power: Metric<PowerSample>
     public var cpuHistory: RingBuffer
     public var memHistory: RingBuffer
     public var netHistory: RingBuffer
@@ -23,6 +24,9 @@ public struct MetricsSnapshot: Sendable, Equatable {
     /// snapshot so the UI reads it through the one channel it already
     /// observes.
     public var perProcessNetAvailable: Bool = false
+    /// Whether IOReport package-power readings are available (the private
+    /// framework resolved). Drives whether the panel shows a power row.
+    public var powerAvailable: Bool = false
 
     public static func == (a: MetricsSnapshot, b: MetricsSnapshot) -> Bool {
         a.generation == b.generation
@@ -39,6 +43,7 @@ public struct MetricsSnapshot: Sendable, Equatable {
             processes: .measuring,
             net: .measuring,
             disk: .measuring,
+            power: .measuring,
             cpuHistory: RingBuffer(windowSeconds: windowSeconds),
             memHistory: RingBuffer(windowSeconds: windowSeconds),
             netHistory: RingBuffer(windowSeconds: windowSeconds),

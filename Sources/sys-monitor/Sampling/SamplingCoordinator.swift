@@ -32,6 +32,7 @@ public final class SamplingCoordinator: @unchecked Sendable {
     private let diskSampler = DiskSampler()
     private let procSampler = ProcessSampler()
     private let netMonitor = PerProcessNetworkMonitor()
+    private let powerMonitor = PowerMonitor()
 
     // MARK: - Serial-queue-isolated state
 
@@ -341,6 +342,9 @@ public final class SamplingCoordinator: @unchecked Sendable {
         // the process list is visible — start the NStat query timer with
         // the open tier.
         netMonitor.start()
+        // Power is panel-tier; re-baseline so the first open read isn't a
+        // delta across the whole closed period.
+        powerMonitor.resetBaseline()
 
         // Open tier keeps a tight leeway — the panel is on screen and
         // visual liveness is the point while it's open.
@@ -435,7 +439,8 @@ public final class SamplingCoordinator: @unchecked Sendable {
             memory: memMetric,
             processes: .measuring,
             net: netMetric,
-            disk: diskMetric
+            disk: diskMetric,
+            power: .measuring
         )
     }
 
@@ -463,6 +468,12 @@ public final class SamplingCoordinator: @unchecked Sendable {
             lastProcMetric = readProcesses(now: now)
         }
 
+        // Package power — panel-tier only. nil until a baseline exists
+        // (first open tick) or when IOReport is unavailable.
+        let powerMetric: Metric<PowerSample> = powerMonitor.isAvailable
+            ? (powerMonitor.read(now: now).map { .ok($0) } ?? .measuring)
+            : .unavailable
+
         prevTickTime = now
         prevTickCadence = openCadenceSeconds
         publishSnapshot(
@@ -470,7 +481,8 @@ public final class SamplingCoordinator: @unchecked Sendable {
             memory: memMetric,
             processes: lastProcMetric,
             net: netMetric,
-            disk: diskMetric
+            disk: diskMetric,
+            power: powerMetric
         )
     }
 
@@ -663,7 +675,8 @@ public final class SamplingCoordinator: @unchecked Sendable {
         memory: Metric<MemorySample>,
         processes: Metric<[ProcSample]>,
         net: Metric<Throughput>,
-        disk: Metric<Throughput>
+        disk: Metric<Throughput>,
+        power: Metric<PowerSample>
     ) {
         generation &+= 1
         if debugTicks {
@@ -683,11 +696,13 @@ public final class SamplingCoordinator: @unchecked Sendable {
             processes: processes,
             net: net,
             disk: disk,
+            power: power,
             cpuHistory: cpuHistory,
             memHistory: memHistory,
             netHistory: netHistory,
             diskHistory: diskHistory,
-            perProcessNetAvailable: netMonitor.isAvailable
+            perProcessNetAvailable: netMonitor.isAvailable,
+            powerAvailable: powerMonitor.isAvailable
         )
         // The hop is an unordered Task — under main-thread starvation two
         // ticks' publishes can land out of order, so never let an older

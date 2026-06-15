@@ -97,6 +97,10 @@ struct PanelRootView: View {
             memorySection
             divider
             netDiskRow
+            if store.snapshot.powerAvailable {
+                divider
+                powerRow
+            }
             divider
             processSection
             divider
@@ -219,6 +223,35 @@ struct PanelRootView: View {
     private var diskUnavailable: Bool {
         if case .unavailable = store.snapshot.disk { return true }
         return false
+    }
+
+    /// Apple-Silicon package power (CPU/GPU/ANE watts) from IOReport —
+    /// panel-tier, shown only when the private framework resolved. ANE is
+    /// best-effort; hidden when it reads zero.
+    private var powerRow: some View {
+        HStack(spacing: DesignTokens.Space.s) {
+            Text("POWER")
+                .font(DesignTokens.numericFont(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .explain("Live package power on Apple Silicon (CPU / GPU / Neural Engine), read sudoless from IOReport energy counters.")
+            Spacer()
+            if case .ok(let p) = store.snapshot.power {
+                powerCell("cpu", p.cpuWatts, .orange)
+                powerCell("gpu", p.gpuWatts, .teal)
+                if p.aneWatts >= 0.01 { powerCell("ane", p.aneWatts, .purple) }
+            } else {
+                Text("—").foregroundStyle(.tertiary)
+                    .font(DesignTokens.numericFont(size: 11))
+            }
+        }
+    }
+
+    private func powerCell(_ label: String, _ watts: Double, _ tint: Color) -> some View {
+        HStack(spacing: 3) {
+            Text(label).foregroundStyle(.tertiary)
+            Text(String(format: "%.2fW", watts)).foregroundStyle(tint)
+        }
+        .font(DesignTokens.numericFont(size: 11))
     }
 
     /// A dim pinned row stating, honestly, that the list is a slice — the

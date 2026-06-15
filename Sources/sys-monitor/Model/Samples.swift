@@ -34,3 +34,12 @@ public struct Throughput: Sendable, Equatable {
     public let inPerSec: Double
     public let outPerSec: Double
 }
+
+/// Instantaneous package power in watts for the Apple-Silicon compute
+/// blocks, derived from IOReport energy-counter deltas. ANE is
+/// best-effort (some chips report it sparsely, idle reads 0).
+public struct PowerSample: Sendable, Equatable {
+    public let cpuWatts: Double
+    public let gpuWatts: Double
+    public let aneWatts: Double
+}
