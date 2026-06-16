@@ -55,6 +55,26 @@ func runSelfTest() -> Int32 {
     check("counter wrap/reset → nil", RateMath.bytesPerSec(prev: 1000, now: 500, elapsed: 1.0) == nil)
     check("zero elapsed → nil", RateMath.bytesPerSec(prev: 0, now: 1000, elapsed: 0) == nil)
 
+    print("RateMath — gap detection (FB-2 / FB-4 transition-gap class)")
+    // The regression that blanked NET/DISK on panel-open and settings-change:
+    // the first tick after idle(5s)→open(1s) sees a ~5 s interval. It must be
+    // judged against the LARGER cadence (5), not the new 1 s threshold.
+    check("idle→open transition interval is NOT a gap",
+          RateMath.isGap(elapsed: 4.0, cadence: 1.0, prevCadence: 5.0, gapMultiplier: 2.0) == false,
+          "4 s after a 5 s-cadence tick must not be a gap")
+    // The bug, asserted as the wrong answer the old code gave: judged against
+    // only the new 1 s cadence (×2 = 2 s), 4 s WOULD have been a gap.
+    check("…and would have been a gap under new-cadence-only judging",
+          RateMath.isGap(elapsed: 4.0, cadence: 1.0, prevCadence: 1.0, gapMultiplier: 2.0) == true)
+    check("cadence raised (idle 2→4) mid-interval is not a gap",
+          RateMath.isGap(elapsed: 3.9, cadence: 4.0, prevCadence: 2.0, gapMultiplier: 2.0) == false)
+    check("genuine long gap IS a gap",
+          RateMath.isGap(elapsed: 15.0, cadence: 1.0, prevCadence: 1.0, gapMultiplier: 2.0) == true)
+    check("steady same-cadence tick is not a gap",
+          RateMath.isGap(elapsed: 1.0, cadence: 1.0, prevCadence: 1.0, gapMultiplier: 2.0) == false)
+    check("first tick (elapsed 0) is a gap → re-baseline",
+          RateMath.isGap(elapsed: 0, cadence: 1.0, prevCadence: 0, gapMultiplier: 2.0) == true)
+
     print("GlyphRenderer.formatBps — width-safe at every magnitude (fa31022)")
     // Every value must render to EXACTLY 5 chars so the throughput cell never
     // clips. The bug was %3.0f rounding 999.7 KB/s → "1000KB" (6 chars).

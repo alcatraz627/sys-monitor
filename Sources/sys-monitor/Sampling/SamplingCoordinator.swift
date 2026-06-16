@@ -403,13 +403,12 @@ public final class SamplingCoordinator: @unchecked Sendable {
         lastProcMetric = .measuring
     }
 
-    /// Gap test for the main tick: the threshold honors whichever cadence
-    /// is LARGER of "now" and "when the baseline was stamped", so
-    /// transition ticks judge old-cadence intervals fairly.
+    /// Gap test for the main tick — thin wrapper over the pure
+    /// `RateMath.isGap` (which is unit-tested for the FB-2/FB-4 case),
+    /// binding it to this coordinator's `prevTickCadence` and multiplier.
     private func isGapTick(elapsed: TimeInterval, cadence: Double) -> Bool {
-        guard elapsed > 0 else { return true }
-        let judged = max(cadence, prevTickCadence)
-        return elapsed > judged * gapMultiplier
+        RateMath.isGap(elapsed: elapsed, cadence: cadence,
+                       prevCadence: prevTickCadence, gapMultiplier: gapMultiplier)
     }
 
     // MARK: - Ticks

@@ -51,4 +51,19 @@ public enum RateMath {
         guard elapsed > 0, now >= prev else { return nil }
         return Double(now - prev) / elapsed
     }
+
+    /// Whether the interval since the last tick is too long to delta across —
+    /// a "gap" that forces a re-baseline. The threshold is judged against the
+    /// LARGER of the current cadence and the cadence the previous tick was
+    /// stamped under, so the first tick after a tier switch or cadence change
+    /// doesn't misclassify a healthy old-cadence interval as a gap. That
+    /// misclassification was field bugs FB-2 / FB-4 (NET/DISK blanking on
+    /// panel-open and on settings change): a ~5 s idle interval judged
+    /// against the 1 s open threshold (×2 = 2 s) read as a gap ~60% of opens.
+    public static func isGap(
+        elapsed: TimeInterval, cadence: Double, prevCadence: Double, gapMultiplier: Double
+    ) -> Bool {
+        guard elapsed > 0 else { return true }
+        return elapsed > max(cadence, prevCadence) * gapMultiplier
+    }
 }
