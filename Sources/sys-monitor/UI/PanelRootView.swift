@@ -1088,8 +1088,13 @@ private struct ExpandedRow: View {
                 // Icon-only, semantically tinted — the colour and glyph
                 // carry the meaning, the footer status line carries the
                 // words on hover (same idiom as the rest of the panel).
-                // Focus only for regular apps (daemons/CLI return nil).
-                if NSRunningApplication(processIdentifier: pid) != nil {
+                // Focus only for `.regular` apps. A bare `!= nil` check is
+                // NOT enough: NSRunningApplication is non-nil for faceless
+                // `.accessory`/`.prohibited` agents too, and `.activate` on
+                // a non-activatable agent can block the main thread — the
+                // FB-1 freeze (UniversalControl). Same `.regular` gate the
+                // kill path uses for `terminate()`.
+                if NSRunningApplication(processIdentifier: pid)?.activationPolicy == .regular {
                     iconButton("arrow.up.forward.app", tint: .accentColor,
                                help: "Bring this app to the front") {
                         NSRunningApplication(processIdentifier: pid)?
