@@ -1,7 +1,25 @@
 <!-- sessions: sys-monitor@2026-05-28 -->
 
-# sys-monitor — Acceptance Sweep
+# sys-monitor — Acceptance Sweep (v1)
 
+> **⚠ Superseded for several behaviors by v2.** This is the v1 sign-off and is
+> kept as the historical record of that build. v2 (`docs/05-v2-plan.md`)
+> reworked a number of behaviors recorded below as "✓ shipped" — flagged
+> inline with **[v2]** where they changed. Notably:
+> - **hover** no longer freezes process *values* (row 4 below) — it freezes
+>   *order only*; values keep ticking (v2 Phase 1, the FB-3 fix).
+> - **Copy-kill / Copy-path** (row 7) became **real** Terminate / Force-Kill
+>   buttons with a confirm step (v2 Phase 3).
+> - **memory pressure** is now a live sysctl poll, not the never-built
+>   DispatchSource this era's `03-implementation` §5.3 described.
+>
+> This doc's sign-off methodology (a checklist filled from claims) is itself
+> the origin of the `declared-ready-without-runtime-exercise` atone. For the
+> current verification surface see: `sys-monitor --self-test` (math),
+> `tools/drills/` (runtime behavior), and `docs/09-manual-checks.md` (pixels).
+>
+> --- original v1 preamble below ---
+>
 > Phase-6 sign-off against the spec's acceptance criteria (`docs/01-spec.md` §10),
 > behavior plan (`docs/02-behavior.md`), and implementation plan (`docs/03-implementation.md`).
 > Phase 5 (Settings) is deferred per a user decision late in the build; everything else
@@ -18,11 +36,11 @@
 | 1 | CPU/Memory/Disk samplers, `RateMath`, `RingBuffer`, disk-I/O spike (verdict: PLAUSIBLE — N8 not triggered) | ✓ shipped |
 | 2 | Idle tier, `MetricsStore`, `SamplingCoordinator`, `GlyphRenderer` (NSImage), live menu-bar readout | ✓ shipped |
 | 3 | `DropPanel`, `PanelController`, open tier, full SwiftUI panel (CPU + per-core strip + memory + net/disk + process list + sort toggle), click-outside dismiss, sleep/wake re-baseline observer | ✓ shipped |
-| 4 | `GraphView` Path sparklines (CPU + memory history), freeze-on-hover for process list, stable secondary sort, disk-row-hide-when-unavailable | ✓ shipped |
+| 4 | `GraphView` Path sparklines (CPU + memory history), freeze-on-hover for process list **[v2: now freezes ORDER only — values keep ticking]**, stable secondary sort, disk-row-hide-when-unavailable | ✓ shipped |
 | 5 | Settings window + launch-at-login + wired controls | ✓ shipped (post-acceptance) |
 | 6 | Process-row VoiceOver labels, this acceptance sweep | partial (a11y minimal, ACs verified below) |
 | 6.5 (redesign) | Icon-led bar: glyph-as-gauge, single throughput value, SF Pro Rounded, color-rare | ✓ shipped |
-| 7 | Process interactions: search filter, click-to-expand, Focus / Copy-kill / Copy-path buttons, app icons, EMA-smoothed ranking, auto-scale memory graph, smoother bar animations | ✓ shipped |
+| 7 | Process interactions: search filter, click-to-expand, Focus / Copy-kill / Copy-path buttons **[v2: real Terminate/Force-Kill w/ confirm; Focus gated to .regular apps; filters gained >N:cpu/mem/disk/net; disk+net I/O columns]**, app icons, EMA-smoothed ranking, auto-scale memory graph, smoother bar animations | ✓ shipped |
 | 7.5 (bar v2) | Icon · bar · value grammar; per-cell identity colors (cpu golden, mem teal, net purple, disk slate-blue); 5-char fixed-width monospaced throughput; log-scale activity-brightness + saturation arrows (toggleable); `cellularbars` for net | ✓ shipped |
 
 ---
