@@ -33,6 +33,7 @@ public final class SamplingCoordinator: @unchecked Sendable {
     private let procSampler = ProcessSampler()
     private let netMonitor = PerProcessNetworkMonitor()
     private let powerMonitor = PowerMonitor()
+    private let batterySampler = BatterySampler()
 
     // MARK: - Serial-queue-isolated state
 
@@ -439,7 +440,8 @@ public final class SamplingCoordinator: @unchecked Sendable {
             processes: .measuring,
             net: netMetric,
             disk: diskMetric,
-            power: .measuring
+            power: .measuring,
+            battery: batterySampler.read()
         )
     }
 
@@ -481,7 +483,8 @@ public final class SamplingCoordinator: @unchecked Sendable {
             processes: lastProcMetric,
             net: netMetric,
             disk: diskMetric,
-            power: powerMetric
+            power: powerMetric,
+            battery: batterySampler.read()
         )
     }
 
@@ -675,7 +678,8 @@ public final class SamplingCoordinator: @unchecked Sendable {
         processes: Metric<[ProcSample]>,
         net: Metric<Throughput>,
         disk: Metric<Throughput>,
-        power: Metric<PowerSample>
+        power: Metric<PowerSample>,
+        battery: BatterySample?
     ) {
         generation &+= 1
         if debugTicks {
@@ -696,6 +700,7 @@ public final class SamplingCoordinator: @unchecked Sendable {
             net: net,
             disk: disk,
             power: power,
+            battery: battery,
             cpuHistory: cpuHistory,
             memHistory: memHistory,
             netHistory: netHistory,

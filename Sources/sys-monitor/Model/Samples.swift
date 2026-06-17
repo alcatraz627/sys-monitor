@@ -43,3 +43,13 @@ public struct PowerSample: Sendable, Equatable {
     public let gpuWatts: Double
     public let aneWatts: Double
 }
+
+/// Battery state from the public IOKit power-sources API. Present only on
+/// machines with an internal battery (a laptop); absent on desktops.
+public struct BatterySample: Sendable, Equatable {
+    public let percent: Int           // 0…100
+    public let charging: Bool
+    public let charged: Bool
+    public let onAC: Bool
+    public let minutesRemaining: Int? // to full (charging) or empty (discharging); nil = calculating
+}

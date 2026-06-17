@@ -14,6 +14,7 @@ public struct MetricsSnapshot: Sendable, Equatable {
     public var net: Metric<Throughput>
     public var disk: Metric<Throughput>
     public var power: Metric<PowerSample>
+    public var battery: BatterySample?   // nil on desktops or while unread
     public var cpuHistory: RingBuffer
     public var memHistory: RingBuffer
     public var netHistory: RingBuffer
@@ -44,6 +45,7 @@ public struct MetricsSnapshot: Sendable, Equatable {
             net: .measuring,
             disk: .measuring,
             power: .measuring,
+            battery: nil,
             cpuHistory: RingBuffer(windowSeconds: windowSeconds),
             memHistory: RingBuffer(windowSeconds: windowSeconds),
             netHistory: RingBuffer(windowSeconds: windowSeconds),

@@ -97,9 +97,9 @@ struct PanelRootView: View {
             memorySection
             divider
             netDiskRow
-            if store.snapshot.powerAvailable {
+            if store.snapshot.battery != nil || store.snapshot.powerAvailable {
                 divider
-                powerRow
+                energyRow
             }
             divider
             processSection
@@ -225,25 +225,76 @@ struct PanelRootView: View {
         return false
     }
 
-    /// Apple-Silicon package power (CPU/GPU/ANE watts) from IOReport —
-    /// panel-tier, shown only when the private framework resolved. ANE is
-    /// best-effort; hidden when it reads zero.
-    private var powerRow: some View {
+    /// Energy row: battery state on the left (laptops; from the public
+    /// power-sources API), IOReport package watts on the right (when the
+    /// private framework resolved). Either half is independently optional
+    /// — the row shows if battery is present OR power is available.
+    private var energyRow: some View {
         HStack(spacing: DesignTokens.Space.s) {
+            batteryElement
+            Spacer()
+            if store.snapshot.powerAvailable {
+                if case .ok(let p) = store.snapshot.power {
+                    powerCell("cpu", p.cpuWatts, .orange)
+                    powerCell("gpu", p.gpuWatts, .teal)
+                    if p.aneWatts >= 0.01 { powerCell("ane", p.aneWatts, .purple) }
+                } else {
+                    Text("—").foregroundStyle(.tertiary)
+                        .font(DesignTokens.numericFont(size: 11))
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var batteryElement: some View {
+        if let b = store.snapshot.battery {
+            HStack(spacing: 4) {
+                Image(systemName: Self.batteryGlyph(b))
+                    .font(.system(size: 12))
+                    .foregroundStyle(Self.batteryTint(b))
+                Text("\(b.percent)%")
+                    .font(DesignTokens.numericFont(size: 11))
+                    .foregroundStyle(Self.batteryTint(b))
+            }
+            .explain(Self.batteryHelp(b))
+        } else {
             Text("POWER")
                 .font(DesignTokens.numericFont(size: 10, weight: .semibold))
                 .foregroundStyle(.secondary)
-                .explain("Live package power on Apple Silicon (CPU / GPU / Neural Engine), read sudoless from IOReport energy counters.")
-            Spacer()
-            if case .ok(let p) = store.snapshot.power {
-                powerCell("cpu", p.cpuWatts, .orange)
-                powerCell("gpu", p.gpuWatts, .teal)
-                if p.aneWatts >= 0.01 { powerCell("ane", p.aneWatts, .purple) }
-            } else {
-                Text("—").foregroundStyle(.tertiary)
-                    .font(DesignTokens.numericFont(size: 11))
-            }
+                .explain("Live package power on Apple Silicon (CPU / GPU / Neural Engine), read sudoless from IOReport.")
         }
+    }
+
+    private static func batteryGlyph(_ b: BatterySample) -> String {
+        if b.charging || (b.onAC && !b.charged) { return "battery.100.bolt" }
+        switch b.percent {
+        case ..<13:  return "battery.0"
+        case ..<38:  return "battery.25"
+        case ..<63:  return "battery.50"
+        case ..<88:  return "battery.75"
+        default:     return "battery.100"
+        }
+    }
+
+    private static func batteryTint(_ b: BatterySample) -> Color {
+        if b.charging || b.charged { return .green }
+        if !b.onAC && b.percent <= 15 { return .red }     // low and draining
+        if !b.onAC && b.percent <= 30 { return .orange }
+        return .secondary
+    }
+
+    private static func batteryHelp(_ b: BatterySample) -> String {
+        let state = b.charged ? "charged"
+            : b.charging ? "charging"
+            : b.onAC ? "on AC, not charging"
+            : "on battery"
+        var s = "Battery \(b.percent)% — \(state)"
+        if let m = b.minutesRemaining {
+            let t = String(format: "%d:%02d", m / 60, m % 60)
+            s += b.charging ? " · \(t) to full" : " · \(t) remaining"
+        }
+        return s
     }
 
     private func powerCell(_ label: String, _ watts: Double, _ tint: Color) -> some View {
