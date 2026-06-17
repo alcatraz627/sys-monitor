@@ -145,6 +145,24 @@ func runSelfTest() -> Int32 {
     m.moveBarCell(.mem, up: false)       // already last
     check("move down at back is a no-op", m.barCells == [.cpu, .net, .mem], "got \(m.barCells)")
 
+    print("SettingsStore — severity thresholds persistence (9.2)")
+    // Absent → ship defaults.
+    let td = freshStore("selftest.thr.empty")
+    check("thresholds default to shipped values",
+          td.severityThresholds == .defaults, "got \(td.severityThresholds)")
+    // Mutate → persists across a reload of the same suite.
+    let suite = "selftest.thr.rt"
+    let d1 = UserDefaults(suiteName: suite)!
+    d1.removePersistentDomain(forName: suite)
+    let s1 = SettingsStore(defaults: d1)
+    s1.severityThresholds = SeverityThresholds(cpuWarn: 0.50, cpuCritical: 0.80,
+                                               memWarn: 0.70, memCritical: 0.95)
+    let s2 = SettingsStore(defaults: d1)   // reload from the same backing store
+    check("thresholds round-trip through defaults",
+          s2.severityThresholds == SeverityThresholds(cpuWarn: 0.50, cpuCritical: 0.80,
+                                                       memWarn: 0.70, memCritical: 0.95),
+          "got \(s2.severityThresholds)")
+
     print(failures == 0 ? "\nALL PASS" : "\n\(failures) FAILURE(S)")
     return failures == 0 ? 0 : 1
 }

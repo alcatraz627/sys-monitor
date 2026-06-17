@@ -44,6 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             cells: settings.barCells,
             activityArrows: settings.arrowActivityIndicator,
             throughputUnit: settings.throughputUnit,
+            thresholds: settings.severityThresholds,
             onClick: { [weak panelController] in
                 panelController?.toggle()
             },
@@ -98,6 +99,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings.$throughputUnit.dropFirst()
             .sink { [weak statusItemController] unit in
                 statusItemController?.updateThroughputUnit(unit)
+            }
+            .store(in: &cancellables)
+
+        settings.$severityThresholds.dropFirst()
+            .sink { [weak statusItemController] t in
+                statusItemController?.updateThresholds(t)
             }
             .store(in: &cancellables)
 

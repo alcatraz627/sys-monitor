@@ -48,6 +48,10 @@ public final class SettingsStore: ObservableObject {
     private static let kPanelHeight = "panelHeight"
     private static let kPanelPinned = "panelPinned"
     private static let kThroughputUnit = "throughputUnit"
+    private static let kCpuWarn  = "sevCpuWarn"
+    private static let kCpuCrit  = "sevCpuCritical"
+    private static let kMemWarn  = "sevMemWarn"
+    private static let kMemCrit  = "sevMemCritical"
 
     @Published public var idleCadenceSeconds: Double {
         didSet {
@@ -99,6 +103,17 @@ public final class SettingsStore: ObservableObject {
         didSet { defaults.set(throughputUnit.rawValue, forKey: Self.kThroughputUnit) }
     }
 
+    /// Load levels at which CPU / memory turn orange then red, in the glyph
+    /// and the panel. User-tunable; persisted as four separate Doubles.
+    @Published public var severityThresholds: SeverityThresholds {
+        didSet {
+            defaults.set(severityThresholds.cpuWarn,     forKey: Self.kCpuWarn)
+            defaults.set(severityThresholds.cpuCritical, forKey: Self.kCpuCrit)
+            defaults.set(severityThresholds.memWarn,     forKey: Self.kMemWarn)
+            defaults.set(severityThresholds.memCritical, forKey: Self.kMemCrit)
+        }
+    }
+
     /// Read-only status of the actual login-item registration, refreshed
     /// after a register/unregister call. The setting (above) is the user's
     /// *intent*; this is what `SMAppService` actually believes.
@@ -141,6 +156,15 @@ public final class SettingsStore: ObservableObject {
         self.panelPinned = defaults.bool(forKey: Self.kPanelPinned)
         self.throughputUnit = ThroughputUnit(rawValue: defaults.string(forKey: Self.kThroughputUnit) ?? "")
             ?? .bytesPerSec
+        let d = SeverityThresholds.defaults
+        func thr(_ key: String, _ fallback: Double) -> Double {
+            (defaults.object(forKey: key) as? Double) ?? fallback
+        }
+        self.severityThresholds = SeverityThresholds(
+            cpuWarn:     thr(Self.kCpuWarn, d.cpuWarn),
+            cpuCritical: thr(Self.kCpuCrit, d.cpuCritical),
+            memWarn:     thr(Self.kMemWarn, d.memWarn),
+            memCritical: thr(Self.kMemCrit, d.memCritical))
     }
 
     /// idle cadence must be >= open cadence (idle is the always-on budget

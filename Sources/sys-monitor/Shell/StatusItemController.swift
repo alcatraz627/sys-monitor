@@ -18,6 +18,7 @@ final class StatusItemController {
     private var cells: [BarCell]
     private var activityArrows: Bool
     private var throughputUnit: ThroughputUnit
+    private var thresholds: SeverityThresholds
     private var renderer: GlyphRenderer
     private var subscription: AnyCancellable?
     private var clickTarget: ClickTarget?
@@ -39,6 +40,7 @@ final class StatusItemController {
         cells: [BarCell] = [.cpu, .mem],
         activityArrows: Bool = true,
         throughputUnit: ThroughputUnit = .bytesPerSec,
+        thresholds: SeverityThresholds = .defaults,
         onClick: @escaping () -> Void,
         onShowSettings: @escaping () -> Void
     ) {
@@ -46,8 +48,9 @@ final class StatusItemController {
         self.cells = cells
         self.activityArrows = activityArrows
         self.throughputUnit = throughputUnit
+        self.thresholds = thresholds
         self.renderer = GlyphRenderer(cells: cells, activityArrows: activityArrows,
-                                      throughputUnit: throughputUnit)
+                                      throughputUnit: throughputUnit, thresholds: thresholds)
         self.statusItem = NSStatusBar.system.statusItem(
             withLength: NSStatusItem.variableLength
         )
@@ -94,10 +97,14 @@ final class StatusItemController {
         self.throughputUnit = unit
         rebuildRenderer()
     }
+    func updateThresholds(_ t: SeverityThresholds) {
+        self.thresholds = t
+        rebuildRenderer()
+    }
 
     private func rebuildRenderer() {
         renderer = GlyphRenderer(cells: cells, activityArrows: activityArrows,
-                                 throughputUnit: throughputUnit)
+                                 throughputUnit: throughputUnit, thresholds: thresholds)
         lastRenderKey = nil
         redraw(snapshot: store.snapshot)
     }

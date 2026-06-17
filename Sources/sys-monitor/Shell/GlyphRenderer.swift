@@ -51,6 +51,8 @@ public struct GlyphRenderer {
     public let activityArrows: Bool
     /// Bytes/s or bits/s for the NET / DISK cells.
     public let throughputUnit: ThroughputUnit
+    /// Per-metric warn/critical load levels for the CPU / MEM cell colors.
+    public let thresholds: SeverityThresholds
     private let valueFont: NSFont
     private let arrowFont: NSFont
     private let arrowW: CGFloat
@@ -83,11 +85,13 @@ public struct GlyphRenderer {
     }
 
     public init(cells: [BarCell] = [.cpu, .mem], activityArrows: Bool = true,
-                throughputUnit: ThroughputUnit = .bytesPerSec) {
+                throughputUnit: ThroughputUnit = .bytesPerSec,
+                thresholds: SeverityThresholds = .defaults) {
         let effective = cells.isEmpty ? [.cpu] : cells
         self.cells = effective
         self.activityArrows = activityArrows
         self.throughputUnit = throughputUnit
+        self.thresholds = thresholds
         let vFont = NSFont.monospacedDigitSystemFont(ofSize: Self.valuePt, weight: .medium)
         let aFont = NSFont.systemFont(ofSize: Self.arrowPt, weight: .semibold)
         self.valueFont = vFont
@@ -122,11 +126,11 @@ public struct GlyphRenderer {
             switch cell {
             case .cpu:
                 let load = Self.cpuLoad(snapshot)
-                let sev = Self.severity(load: load, warn: 0.60, critical: 0.85)
+                let sev = Self.severity(load: load, warn: thresholds.cpuWarn, critical: thresholds.cpuCritical)
                 parts.append("c\(state(snapshot.cpu))\(Self.cpuPercentText(snapshot))|\(Int(load * 32))|\(sev)")
             case .mem:
                 let load = Self.memLoad(snapshot)
-                let sev = Self.severity(load: load, warn: 0.75, critical: 0.92)
+                let sev = Self.severity(load: load, warn: thresholds.memWarn, critical: thresholds.memCritical)
                 parts.append("m\(state(snapshot.memory))\(Self.memPercentText(snapshot))|\(Int(load * 32))|\(sev)")
             case .net:
                 let d = Self.netDownBps(snapshot), u = Self.netUpBps(snapshot)
@@ -230,7 +234,7 @@ public struct GlyphRenderer {
                 symbol: "cpu",
                 load: Self.cpuLoad(snapshot),
                 valueText: Self.cpuPercentText(snapshot),
-                severity: Self.severity(load: Self.cpuLoad(snapshot), warn: 0.60, critical: 0.85),
+                severity: Self.severity(load: Self.cpuLoad(snapshot), warn: thresholds.cpuWarn, critical: thresholds.cpuCritical),
                 identityColor: identity, in: rect
             )
         case .mem:
@@ -238,7 +242,7 @@ public struct GlyphRenderer {
                 symbol: "memorychip",
                 load: Self.memLoad(snapshot),
                 valueText: Self.memPercentText(snapshot),
-                severity: Self.severity(load: Self.memLoad(snapshot), warn: 0.75, critical: 0.92),
+                severity: Self.severity(load: Self.memLoad(snapshot), warn: thresholds.memWarn, critical: thresholds.memCritical),
                 identityColor: identity, in: rect
             )
         case .net:

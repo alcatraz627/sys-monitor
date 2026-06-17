@@ -147,7 +147,11 @@ struct PanelRootView: View {
                 // same thresholds the bars use.
                 Text(cpuValueText)
                     .font(DesignTokens.numericFont(size: 12, weight: .medium))
-                    .foregroundStyle(cpuLoad >= 0.60 ? DesignTokens.loadColor(cpuLoad) : Color.primary)
+                    .foregroundStyle(cpuLoad >= settings.severityThresholds.cpuWarn
+                        ? DesignTokens.loadColor(cpuLoad,
+                            warn: settings.severityThresholds.cpuWarn,
+                            critical: settings.severityThresholds.cpuCritical)
+                        : Color.primary)
             }
             // Sparkline carries "now + recent"; the per-core strip carries
             // distribution. The overall bar was a third encoding of "now"
@@ -166,7 +170,11 @@ struct PanelRootView: View {
                 Spacer()
                 Text(memValueText)
                     .font(DesignTokens.numericFont(size: 12, weight: .medium))
-                    .foregroundStyle(memLoad >= 0.60 ? DesignTokens.loadColor(memLoad) : Color.primary)
+                    .foregroundStyle(memLoad >= settings.severityThresholds.memWarn
+                        ? DesignTokens.loadColor(memLoad,
+                            warn: settings.severityThresholds.memWarn,
+                            critical: settings.severityThresholds.memCritical)
+                        : Color.primary)
             }
             // Auto-scale because memory sits in a narrow band; minSpan
             // keeps the trace from amplifying single-percent jitter.
@@ -692,6 +700,8 @@ struct PanelRootView: View {
 private struct UsageBar: View {
     let load: Double
     let height: CGFloat
+    var warn: Double = 0.60
+    var critical: Double = 0.85
 
     var body: some View {
         GeometryReader { geo in
@@ -703,7 +713,7 @@ private struct UsageBar: View {
                     // EMPTY, not as a pebble indistinguishable from a few
                     // percent of load. The tighter radius keeps small
                     // fills bar-shaped instead of blob-shaped.
-                    .fill(DesignTokens.loadColor(load))
+                    .fill(DesignTokens.loadColor(load, warn: warn, critical: critical))
                     .frame(width: geo.size.width * CGFloat(min(max(load, 0), 1)))
                     // GPU-side interpolation on width — cheap, smooths the
                     // 1Hz tick edges into a continuous-looking bar.
@@ -715,6 +725,7 @@ private struct UsageBar: View {
 }
 
 private struct CoreStrip: View {
+    @EnvironmentObject var settings: SettingsStore
     let loads: [Double]
 
     var body: some View {
@@ -745,7 +756,9 @@ private struct CoreStrip: View {
             ForEach(0..<rows.count, id: \.self) { i in
                 HStack(spacing: 2) {
                     ForEach(0..<rows[i].count, id: \.self) { j in
-                        UsageBar(load: rows[i][j], height: 8)
+                        UsageBar(load: rows[i][j], height: 8,
+                                 warn: settings.severityThresholds.cpuWarn,
+                                 critical: settings.severityThresholds.cpuCritical)
                             .opacity(placeholder ? 0.35 : 1)
                     }
                 }

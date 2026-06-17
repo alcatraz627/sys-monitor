@@ -83,6 +83,23 @@ struct SettingsView: View {
                 .help("How NET / DISK rates read, in the glyph and the panel. Bytes/s matches Activity Monitor and disk benchmarks; bits/s matches NIC and ISP quoting.")
             }
 
+            Section("Severity thresholds") {
+                Text("Load levels where CPU and memory turn orange (warn) then red (critical) — in the glyph and the panel.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                thresholdSlider("CPU warn",        value: $settings.severityThresholds.cpuWarn)
+                thresholdSlider("CPU critical",     value: $settings.severityThresholds.cpuCritical)
+                thresholdSlider("Memory warn",      value: $settings.severityThresholds.memWarn)
+                thresholdSlider("Memory critical",  value: $settings.severityThresholds.memCritical)
+                if settings.severityThresholds.cpuWarn >= settings.severityThresholds.cpuCritical
+                    || settings.severityThresholds.memWarn >= settings.severityThresholds.memCritical {
+                    Label("Warn should sit below critical, or the orange band disappears",
+                          systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                        .font(.caption)
+                }
+            }
+
             Section("Process list") {
                 Stepper(value: $settings.processCount, in: 5...25, step: 1) {
                     HStack {
@@ -121,6 +138,21 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .frame(minWidth: 380, minHeight: 460)
+    }
+
+    /// A labeled 0–100% slider for one severity threshold. Coarse 5% steps
+    /// — finer granularity isn't meaningful for a color band.
+    private func thresholdSlider(_ label: String, value: Binding<Double>) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text(label)
+                Spacer()
+                Text("\(Int((value.wrappedValue * 100).rounded()))%")
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            Slider(value: value, in: 0.30...0.99, step: 0.05)
+        }
     }
 
     private func formatSeconds(_ v: Double) -> String {

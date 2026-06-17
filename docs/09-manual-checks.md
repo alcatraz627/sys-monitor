@@ -46,6 +46,12 @@ Mark a row failed → it's a one-line bug report back to me.
       per-process disk/net columns all switch together, live. Bits show a
       lowercase `b` (e.g. `12Mb/s`), bytes an uppercase `B`. Cell width stays
       stable (no menu-bar reflow jitter). Setting survives relaunch.
+- [ ] **severity thresholds (9.2)** — Settings ▸ Severity thresholds: drag CPU
+      warn down to ~30%. Under light load the CPU value text + glyph CPU bar +
+      per-core bars all turn orange/red at the new level, live. Memory has its
+      own pair (default 75/92). The warn/critical inversion warning appears if
+      warn ≥ critical. Glyph and panel now agree per-metric (previously memory
+      coloured at 60% in the panel but 75% in the glyph). Survives relaunch.
 
 ## Window / lifecycle
 - [ ] **Esc** closes the panel; **right-click** the menu-bar icon → Settings/Quit.
