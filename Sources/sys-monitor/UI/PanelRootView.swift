@@ -798,7 +798,14 @@ struct PanelRootView: View {
                 return a.pid < b.pid
             }
         }
-        return Array(sorted.prefix(settings.processCount))
+        // Pinned processes float to the top in their metric order and are
+        // never cut by the row cap; the rest fill the remaining slots.
+        let pins = settings.pinnedPids
+        guard !pins.isEmpty else { return Array(sorted.prefix(settings.processCount)) }
+        let pinned = sorted.filter { pins.contains($0.pid) }
+        let rest   = sorted.filter { !pins.contains($0.pid) }
+        let restSlots = max(0, settings.processCount - pinned.count)
+        return pinned + rest.prefix(restSlots)
     }
 }
 
@@ -1212,6 +1219,7 @@ private struct ProcessList: View {
 /// parent list (which caches it shared with the row's icon), so this view
 /// holds no per-process state of its own.
 private struct ExpandedRow: View {
+    @EnvironmentObject var settings: SettingsStore
     let pid: Int32
     let path: String?
 
@@ -1258,6 +1266,15 @@ private struct ExpandedRow: View {
                 }
             }
             HStack(spacing: 6) {
+                // Pin/unpin: keep this process at the top of the list
+                // regardless of its rank ("watch this one").
+                let pinned = settings.pinnedPids.contains(pid)
+                iconButton(pinned ? "pin.fill" : "pin",
+                           tint: pinned ? .accentColor : .secondary,
+                           help: pinned ? "Unpin — stop keeping this on top"
+                                        : "Pin to top — keep watching this process") {
+                    settings.togglePin(pid)
+                }
                 // Icon-only, semantically tinted — the colour and glyph
                 // carry the meaning, the footer status line carries the
                 // words on hover (same idiom as the rest of the panel).

@@ -80,6 +80,14 @@ Mark a row failed → it's a one-line bug report back to me.
       POWER/BATTERY/LOAD lines + top-5 processes, using the on-screen formatted
       values at the current throughput unit (bytes vs bits).
 
+## Process interactions — v2.1
+- [ ] **watch a process / pin (8.1)** — expand a row → a pin icon appears as the
+      first action. Click it: the row jumps to the top of the list and stays
+      there (filled pin) regardless of the sort metric (cycle CPU→MEM→NET). A
+      pinned process below the row cap still shows (it's never cut). Unpin → it
+      returns to its ranked spot. Kill a pinned process → its row drops silently.
+      Pins survive quit+relaunch.
+
 ## Window / lifecycle
 - [ ] **Esc** closes the panel; **right-click** the menu-bar icon → Settings/Quit.
 - [ ] **resize** — drag the panel's bottom edge; height persists across reopen.

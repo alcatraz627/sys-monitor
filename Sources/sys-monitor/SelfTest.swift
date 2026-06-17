@@ -219,6 +219,22 @@ func runSelfTest() -> Int32 {
               ev4.evaluate(cpuLoad: 1.0, memLoad: 1.0, now: 1).isEmpty)
     }
 
+    print("SettingsStore — pinned pids (8.1)")
+    do {
+        let suite = "selftest.pins.rt"
+        let d = UserDefaults(suiteName: suite)!
+        d.removePersistentDomain(forName: suite)
+        let s = SettingsStore(defaults: d)
+        check("pins start empty", s.pinnedPids.isEmpty)
+        s.togglePin(42); s.togglePin(7)
+        check("togglePin inserts", s.pinnedPids == [42, 7], "got \(s.pinnedPids)")
+        s.togglePin(42)
+        check("togglePin removes on second call", s.pinnedPids == [7], "got \(s.pinnedPids)")
+        let s2 = SettingsStore(defaults: d)   // reload
+        check("pins round-trip through defaults (Int32↔Int)",
+              s2.pinnedPids == [7], "got \(s2.pinnedPids)")
+    }
+
     print("GlyphRenderer — battery cell dispatch (7.4)")
     do {
         let r = GlyphRenderer(cells: [.battery])

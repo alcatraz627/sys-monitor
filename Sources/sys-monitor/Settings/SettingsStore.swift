@@ -52,6 +52,7 @@ public final class SettingsStore: ObservableObject {
     private static let kCpuCrit  = "sevCpuCritical"
     private static let kMemWarn  = "sevMemWarn"
     private static let kMemCrit  = "sevMemCritical"
+    private static let kPinnedPids = "pinnedPids"
     private static let kAlertsOn   = "alertsEnabled"
     private static let kAlertCpu   = "alertCpuThreshold"
     private static let kAlertMem   = "alertMemThreshold"
@@ -119,6 +120,14 @@ public final class SettingsStore: ObservableObject {
         }
     }
 
+    /// Processes the user pinned to the top of the list ("watch this one"),
+    /// by pid. Pinned rows sort above everything else and are never cut by
+    /// the row-count cap. A pinned pid that exits just stops appearing.
+    /// Persisted as a sorted Int array.
+    @Published public var pinnedPids: Set<Int32> {
+        didSet { defaults.set(pinnedPids.sorted().map(Int.init), forKey: Self.kPinnedPids) }
+    }
+
     /// When/how the monitor notifies about sustained high CPU or memory —
     /// the only feature that's useful while the panel is closed. Ships OFF.
     @Published public var alertConfig: AlertConfig {
@@ -182,6 +191,8 @@ public final class SettingsStore: ObservableObject {
             cpuCritical: thr(Self.kCpuCrit, d.cpuCritical),
             memWarn:     thr(Self.kMemWarn, d.memWarn),
             memCritical: thr(Self.kMemCrit, d.memCritical))
+        let storedPins = (defaults.object(forKey: Self.kPinnedPids) as? [Int]) ?? []
+        self.pinnedPids = Set(storedPins.map(Int32.init))
         let ad = AlertConfig.defaults
         self.alertConfig = AlertConfig(
             enabled:         (defaults.object(forKey: Self.kAlertsOn) as? Bool) ?? ad.enabled,
@@ -224,6 +235,12 @@ public final class SettingsStore: ObservableObject {
         } else if barCells.count > 1 {
             barCells.removeAll { $0 == cell }
         }
+    }
+
+    /// Pin or unpin a process by pid (the row's "watch" toggle).
+    public func togglePin(_ pid: Int32) {
+        if pinnedPids.contains(pid) { pinnedPids.remove(pid) }
+        else { pinnedPids.insert(pid) }
     }
 
     /// Nudge a cell one slot toward the front (`up`) or back of the bar.
