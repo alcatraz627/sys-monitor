@@ -163,6 +163,62 @@ func runSelfTest() -> Int32 {
                                                        memWarn: 0.70, memCritical: 0.95),
           "got \(s2.severityThresholds)")
 
+    print("SettingsStore — alert config persistence (6.1 / 9.5)")
+    let ac0 = freshStore("selftest.alert.empty")
+    check("alert config defaults to OFF", ac0.alertConfig == .defaults, "got \(ac0.alertConfig)")
+    let asuite = "selftest.alert.rt"
+    let ad1 = UserDefaults(suiteName: asuite)!
+    ad1.removePersistentDomain(forName: asuite)
+    let as1 = SettingsStore(defaults: ad1)
+    as1.alertConfig = AlertConfig(enabled: true, cpuThreshold: 0.70, memThreshold: 0.88,
+                                  sustainTicks: 8, cooldownSeconds: 120)
+    let as2 = SettingsStore(defaults: ad1)
+    check("alert config round-trips (incl. enabled + ticks)",
+          as2.alertConfig == AlertConfig(enabled: true, cpuThreshold: 0.70, memThreshold: 0.88,
+                                         sustainTicks: 8, cooldownSeconds: 120),
+          "got \(as2.alertConfig)")
+
+    print("AlertEvaluator — debounce + cooldown (6.1)")
+    do {
+        var ev = AlertEvaluator(config: AlertConfig(enabled: true, cpuThreshold: 0.80,
+                                memThreshold: 0.90, sustainTicks: 3, cooldownSeconds: 100))
+        check("below threshold → no fire", ev.evaluate(cpuLoad: 0.5, memLoad: 0.5, now: 0).isEmpty)
+        check("1/3 high → no fire", ev.evaluate(cpuLoad: 0.85, memLoad: 0.1, now: 1).isEmpty)
+        check("2/3 high → no fire", ev.evaluate(cpuLoad: 0.85, memLoad: 0.1, now: 2).isEmpty)
+        let fire = ev.evaluate(cpuLoad: 0.85, memLoad: 0.1, now: 3)
+        check("3/3 high → cpu fires once", fire.count == 1 && fire.first?.kind == .cpu, "got \(fire)")
+        _ = ev.evaluate(cpuLoad: 0.9, memLoad: 0.1, now: 4)
+        _ = ev.evaluate(cpuLoad: 0.9, memLoad: 0.1, now: 5)
+        check("sustained within cooldown → silent",
+              ev.evaluate(cpuLoad: 0.9, memLoad: 0.1, now: 6).isEmpty)
+        check("past cooldown → re-fires",
+              ev.evaluate(cpuLoad: 0.9, memLoad: 0.1, now: 104).first?.kind == .cpu)
+    }
+    do {
+        let cfg = AlertConfig(enabled: true, cpuThreshold: 0.80, memThreshold: 0.90,
+                              sustainTicks: 3, cooldownSeconds: 100)
+        var ev = AlertEvaluator(config: cfg)
+        _ = ev.evaluate(cpuLoad: 0.85, memLoad: 0.1, now: 1)
+        _ = ev.evaluate(cpuLoad: 0.85, memLoad: 0.1, now: 2)
+        _ = ev.evaluate(cpuLoad: 0.10, memLoad: 0.1, now: 3)   // drop resets
+        check("drop below threshold resets streak",
+              ev.evaluate(cpuLoad: 0.85, memLoad: 0.1, now: 4).isEmpty)
+        var ev2 = AlertEvaluator(config: cfg)
+        _ = ev2.evaluate(cpuLoad: 0.85, memLoad: nil, now: 1)
+        _ = ev2.evaluate(cpuLoad: nil, memLoad: nil, now: 2)   // unavailable resets
+        check("unavailable resets streak",
+              ev2.evaluate(cpuLoad: 0.85, memLoad: nil, now: 3).isEmpty)
+        var ev3 = AlertEvaluator(config: cfg)
+        _ = ev3.evaluate(cpuLoad: 0.1, memLoad: 0.95, now: 1)
+        _ = ev3.evaluate(cpuLoad: 0.1, memLoad: 0.95, now: 2)
+        check("memory fires independently of cpu",
+              ev3.evaluate(cpuLoad: 0.1, memLoad: 0.95, now: 3).first?.kind == .memory)
+        var ev4 = AlertEvaluator(config: AlertConfig(enabled: false, cpuThreshold: 0.1,
+                                 memThreshold: 0.1, sustainTicks: 1, cooldownSeconds: 0))
+        check("disabled → no fire even at trivial threshold",
+              ev4.evaluate(cpuLoad: 1.0, memLoad: 1.0, now: 1).isEmpty)
+    }
+
     print(failures == 0 ? "\nALL PASS" : "\n\(failures) FAILURE(S)")
     return failures == 0 ? 0 : 1
 }

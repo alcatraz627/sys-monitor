@@ -52,6 +52,11 @@ public final class SettingsStore: ObservableObject {
     private static let kCpuCrit  = "sevCpuCritical"
     private static let kMemWarn  = "sevMemWarn"
     private static let kMemCrit  = "sevMemCritical"
+    private static let kAlertsOn   = "alertsEnabled"
+    private static let kAlertCpu   = "alertCpuThreshold"
+    private static let kAlertMem   = "alertMemThreshold"
+    private static let kAlertTicks = "alertSustainTicks"
+    private static let kAlertCool  = "alertCooldownSeconds"
 
     @Published public var idleCadenceSeconds: Double {
         didSet {
@@ -114,6 +119,18 @@ public final class SettingsStore: ObservableObject {
         }
     }
 
+    /// When/how the monitor notifies about sustained high CPU or memory —
+    /// the only feature that's useful while the panel is closed. Ships OFF.
+    @Published public var alertConfig: AlertConfig {
+        didSet {
+            defaults.set(alertConfig.enabled,         forKey: Self.kAlertsOn)
+            defaults.set(alertConfig.cpuThreshold,    forKey: Self.kAlertCpu)
+            defaults.set(alertConfig.memThreshold,    forKey: Self.kAlertMem)
+            defaults.set(alertConfig.sustainTicks,    forKey: Self.kAlertTicks)
+            defaults.set(alertConfig.cooldownSeconds, forKey: Self.kAlertCool)
+        }
+    }
+
     /// Read-only status of the actual login-item registration, refreshed
     /// after a register/unregister call. The setting (above) is the user's
     /// *intent*; this is what `SMAppService` actually believes.
@@ -165,6 +182,13 @@ public final class SettingsStore: ObservableObject {
             cpuCritical: thr(Self.kCpuCrit, d.cpuCritical),
             memWarn:     thr(Self.kMemWarn, d.memWarn),
             memCritical: thr(Self.kMemCrit, d.memCritical))
+        let ad = AlertConfig.defaults
+        self.alertConfig = AlertConfig(
+            enabled:         (defaults.object(forKey: Self.kAlertsOn) as? Bool) ?? ad.enabled,
+            cpuThreshold:    (defaults.object(forKey: Self.kAlertCpu) as? Double) ?? ad.cpuThreshold,
+            memThreshold:    (defaults.object(forKey: Self.kAlertMem) as? Double) ?? ad.memThreshold,
+            sustainTicks:    (defaults.object(forKey: Self.kAlertTicks) as? Int) ?? ad.sustainTicks,
+            cooldownSeconds: (defaults.object(forKey: Self.kAlertCool) as? Double) ?? ad.cooldownSeconds)
     }
 
     /// idle cadence must be >= open cadence (idle is the always-on budget

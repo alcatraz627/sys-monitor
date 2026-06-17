@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItemController: StatusItemController?
     private var panelController: PanelController?
     private var settingsWindowController: SettingsWindowController?
+    private let alertNotifier = AlertNotifier()
     private var cancellables = Set<AnyCancellable>()
     private var testHookSource: DispatchSourceSignal?
 
@@ -62,6 +63,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             disk: settings.barCells.contains(.disk)
         )
 
+        // Alerts: prime the notification permission, install the main-actor
+        // sink, and push the user's current config. The evaluator runs every
+        // tick (idle tier too) so alerts fire with the panel closed.
+        alertNotifier.requestAuthorization()
+        let notifier = alertNotifier
+        coordinator.setAlertHandler { events in notifier.post(events) }
+        coordinator.updateAlertConfig(settings.alertConfig)
+
         self.settings = settings
         self.store = store
         self.coordinator = coordinator
@@ -105,6 +114,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings.$severityThresholds.dropFirst()
             .sink { [weak statusItemController] t in
                 statusItemController?.updateThresholds(t)
+            }
+            .store(in: &cancellables)
+
+        settings.$alertConfig.dropFirst()
+            .sink { [weak coordinator] cfg in
+                coordinator?.updateAlertConfig(cfg)
             }
             .store(in: &cancellables)
 

@@ -59,6 +59,13 @@ public final class SamplingCoordinator: @unchecked Sendable {
     private var idleSamplesNet: Bool = false
     private var idleSamplesDisk: Bool = false
 
+    /// Alert decision state — mutated only on `queue` (every tick feeds it
+    /// one reading). Disabled by default; the shell pushes the user's
+    /// config via `updateAlertConfig`. `onAlert` is invoked on the main
+    /// actor for each fired alert (notification posting is UI work).
+    private var alertEvaluator = AlertEvaluator(config: .defaults)
+    private var onAlert: (@MainActor @Sendable ([AlertEvent]) -> Void)?
+
     // Rate-metric prev state. Each one is "the last raw reading we saw,"
     // or nil if we haven't taken a baseline yet (or just dropped one due
     // to a gap or a tier switch into a tier where this metric exists).
@@ -130,6 +137,18 @@ public final class SamplingCoordinator: @unchecked Sendable {
         self.store = store
         self.idleCadenceSeconds = idleCadenceSeconds
         self.openCadenceSeconds = openCadenceSeconds
+    }
+
+    /// Push the user's alert configuration (enable + thresholds). Routed
+    /// through the queue because the evaluator is queue-isolated state.
+    public func updateAlertConfig(_ config: AlertConfig) {
+        queue.async { [weak self] in self?.alertEvaluator.config = config }
+    }
+
+    /// Install the main-actor sink that posts notifications for fired
+    /// alerts. Set once at startup, before sampling produces any tick.
+    public func setAlertHandler(_ handler: @escaping @MainActor @Sendable ([AlertEvent]) -> Void) {
+        queue.async { [weak self] in self?.onAlert = handler }
     }
 
     /// Start the sampler in idle tier. Idempotent.
@@ -708,6 +727,17 @@ public final class SamplingCoordinator: @unchecked Sendable {
             perProcessNetAvailable: netMonitor.isAvailable,
             powerAvailable: powerMonitor.isAvailable
         )
+        // Evaluate alerts on the queue (the evaluator is queue-isolated).
+        // Loads are nil when the metric isn't .ok this tick → the evaluator
+        // treats that as "no reading" and won't alert on missing data.
+        let cpuLoad: Double? = { if case .ok(let v) = cpu { return v.overall } else { return nil } }()
+        let memLoad: Double? = {
+            if case .ok(let v) = memory, v.totalBytes > 0 { return Double(v.usedBytes) / Double(v.totalBytes) }
+            return nil
+        }()
+        let alerts = alertEvaluator.evaluate(cpuLoad: cpuLoad, memLoad: memLoad, now: monoSeconds())
+        let alertHandler = onAlert
+
         // The hop is an unordered Task — under main-thread starvation two
         // ticks' publishes can land out of order, so never let an older
         // generation overwrite a newer one. The `>` is not wrap-safe, but
@@ -715,6 +745,7 @@ public final class SamplingCoordinator: @unchecked Sendable {
         // (~585 billion years at 1 Hz); ordering protection matters,
         // wrap does not.
         Task { @MainActor [weak store, log] in
+            if !alerts.isEmpty { alertHandler?(alerts) }
             guard let store else { return }
             guard snap.generation > store.snapshot.generation else {
                 log.debug("dropped out-of-order snapshot gen \(snap.generation) (store at \(store.snapshot.generation))")

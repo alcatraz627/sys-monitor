@@ -100,6 +100,31 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Alerts") {
+                Toggle("Notify on sustained high load", isOn: $settings.alertConfig.enabled)
+                    .help("Posts a notification when CPU or memory stays above its threshold for a while — the one feature that's useful while the panel is closed.")
+                if settings.alertConfig.enabled {
+                    thresholdSlider("CPU alert at",    value: $settings.alertConfig.cpuThreshold)
+                    thresholdSlider("Memory alert at", value: $settings.alertConfig.memThreshold)
+                    Stepper(value: $settings.alertConfig.sustainTicks, in: 2...30) {
+                        HStack {
+                            Text("Sustained for")
+                            Spacer()
+                            Text("\(settings.alertConfig.sustainTicks) samples")
+                                .foregroundStyle(.secondary).monospacedDigit()
+                        }
+                    }
+                    Stepper(value: cooldownMinutes, in: 1...60) {
+                        HStack {
+                            Text("Quiet period after")
+                            Spacer()
+                            Text("\(Int(settings.alertConfig.cooldownSeconds / 60)) min")
+                                .foregroundStyle(.secondary).monospacedDigit()
+                        }
+                    }
+                }
+            }
+
             Section("Process list") {
                 Stepper(value: $settings.processCount, in: 5...25, step: 1) {
                     HStack {
@@ -138,6 +163,14 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .frame(minWidth: 380, minHeight: 460)
+    }
+
+    /// Alert cooldown surfaced in whole minutes; stored as seconds.
+    private var cooldownMinutes: Binding<Int> {
+        Binding(
+            get: { Int(settings.alertConfig.cooldownSeconds / 60) },
+            set: { settings.alertConfig.cooldownSeconds = Double($0) * 60 }
+        )
     }
 
     /// A labeled 0–100% slider for one severity threshold. Coarse 5% steps

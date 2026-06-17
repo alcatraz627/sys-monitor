@@ -53,6 +53,15 @@ Mark a row failed → it's a one-line bug report back to me.
       warn ≥ critical. Glyph and panel now agree per-metric (previously memory
       coloured at 60% in the panel but 75% in the glyph). Survives relaunch.
 
+- [ ] **threshold alerts (6.1 / 9.5)** — Settings ▸ Alerts ▸ enable. On first
+      enable, macOS prompts for notification permission (grant it). Set "CPU
+      alert at" to ~30% and "Sustained for" to ~3 samples, then run
+      `yes > /dev/null` in a terminal. Within a few samples a "High CPU"
+      notification appears — **once**, not every tick. Kill `yes`; it stops.
+      Re-spin within the quiet period → no repeat until the cooldown elapses.
+      Alerts fire with the panel closed (that's the point). Config survives
+      relaunch; disabling stops all alerts.
+
 ## Window / lifecycle
 - [ ] **Esc** closes the panel; **right-click** the menu-bar icon → Settings/Quit.
 - [ ] **resize** — drag the panel's bottom edge; height persists across reopen.
