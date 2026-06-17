@@ -98,6 +98,40 @@ func runSelfTest() -> Int32 {
         check("formatBps \(name) is 5 chars", s.count == 5, "got \"\(s)\" (\(s.count))")
     }
 
+    print("SettingsStore — bar-cell migration + reorder (9.4)")
+    // Fresh store backed by an isolated, cleared defaults suite.
+    func freshStore(_ suite: String, seed: (UserDefaults) -> Void = { _ in }) -> SettingsStore {
+        let d = UserDefaults(suiteName: suite)!
+        d.removePersistentDomain(forName: suite)
+        seed(d)
+        return SettingsStore(defaults: d)
+    }
+    // Legacy OptionSet Int (cpu|net = 1|4 = 5) migrates to the legacy fixed
+    // order CPU>MEM>NET>DISK → [.cpu, .net].
+    let legacy = freshStore("selftest.bc.legacy") { $0.set(5, forKey: "barCells") }
+    check("legacy Int 5 → [.cpu, .net]", legacy.barCells == [.cpu, .net], "got \(legacy.barCells)")
+    // New [String] format preserves the stored order verbatim.
+    let arr = freshStore("selftest.bc.arr") { $0.set(["disk", "cpu"], forKey: "barCells") }
+    check("array [disk,cpu] preserves order", arr.barCells == [.disk, .cpu], "got \(arr.barCells)")
+    // Absent → default.
+    check("absent → default [.cpu,.mem]", freshStore("selftest.bc.empty").barCells == [.cpu, .mem])
+    // setBarCell: enable appends; the last cell can never be removed.
+    let g = freshStore("selftest.bc.guard")
+    g.setBarCell(.net, enabled: true)
+    check("enable appends at end", g.barCells == [.cpu, .mem, .net], "got \(g.barCells)")
+    g.setBarCell(.cpu, enabled: false)
+    g.setBarCell(.mem, enabled: false)
+    g.setBarCell(.net, enabled: false)   // would empty the bar → refused
+    check("last cell cannot be removed", g.barCells.count == 1, "got \(g.barCells)")
+    // moveBarCell: adjacent swap, clamped at both ends.
+    let m = freshStore("selftest.bc.move") { $0.set(["cpu", "mem", "net"], forKey: "barCells") }
+    m.moveBarCell(.net, up: true)
+    check("move up swaps with predecessor", m.barCells == [.cpu, .net, .mem], "got \(m.barCells)")
+    m.moveBarCell(.cpu, up: true)        // already first
+    check("move up at front is a no-op", m.barCells == [.cpu, .net, .mem], "got \(m.barCells)")
+    m.moveBarCell(.mem, up: false)       // already last
+    check("move down at back is a no-op", m.barCells == [.cpu, .net, .mem], "got \(m.barCells)")
+
     print(failures == 0 ? "\nALL PASS" : "\n\(failures) FAILURE(S)")
     return failures == 0 ? 0 : 1
 }

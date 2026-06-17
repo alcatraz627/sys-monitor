@@ -34,19 +34,42 @@ struct SettingsView: View {
             }
 
             Section("Menu bar") {
-                Text("Pick one or more metrics. They render left-to-right in the order CPU > MEM > NET > DISK.")
+                Text("Enable one or more metrics, then order them. They render left-to-right in the menu bar in the order listed below.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Toggle("CPU",       isOn: cellBinding(.cpu))
                 Toggle("Memory",    isOn: cellBinding(.mem))
                 Toggle("Network",   isOn: cellBinding(.net))
                 Toggle("Disk I/O",  isOn: cellBinding(.disk))
-                if settings.barCells.ordered.count == 1 {
+                if settings.barCells.count == 1 {
                     Label("At least one metric must remain enabled",
                           systemImage: "info.circle")
                         .foregroundStyle(.secondary)
                         .font(.caption)
                 }
+
+                // Order of the enabled cells. Up/down nudges one slot; the
+                // chevrons disable at the ends.
+                ForEach(Array(settings.barCells.enumerated()), id: \.element) { idx, cell in
+                    HStack {
+                        Text("\(idx + 1).")
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                        Text(cell.displayName)
+                        Spacer()
+                        Button { settings.moveBarCell(cell, up: true) } label: {
+                            Image(systemName: "chevron.up")
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(idx == 0)
+                        Button { settings.moveBarCell(cell, up: false) } label: {
+                            Image(systemName: "chevron.down")
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(idx == settings.barCells.count - 1)
+                    }
+                }
+
                 Toggle("Activity-brightness arrows (NET / DISK)",
                        isOn: $settings.arrowActivityIndicator)
                     .help("Arrow brightness scales logarithmically with throughput — dim at idle, bright at high transfer. No animation, no extra CPU.")
@@ -97,18 +120,13 @@ struct SettingsView: View {
         return String(format: "%.1f s", v)
     }
 
-    /// Toggle for a single bar cell. The setter refuses to remove the
-    /// last enabled cell — the menu-bar glyph must always show something.
-    private func cellBinding(_ cell: SettingsStore.BarCells) -> Binding<Bool> {
+    /// Toggle for a single bar cell. The store's `setBarCell` refuses to
+    /// remove the last enabled cell — the menu-bar glyph must always show
+    /// something.
+    private func cellBinding(_ cell: BarCell) -> Binding<Bool> {
         Binding(
             get: { settings.barCells.contains(cell) },
-            set: { wanted in
-                if wanted {
-                    settings.barCells.insert(cell)
-                } else if settings.barCells.ordered.count > 1 {
-                    settings.barCells.remove(cell)
-                }
-            }
+            set: { settings.setBarCell(cell, enabled: $0) }
         )
     }
 }

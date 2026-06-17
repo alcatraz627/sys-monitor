@@ -41,7 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let statusItemController = StatusItemController(
             store: store,
-            cells: settings.barCells.ordered,
+            cells: settings.barCells,
             activityArrows: settings.arrowActivityIndicator,
             onClick: { [weak panelController] in
                 panelController?.toggle()
@@ -81,7 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings.$barCells.dropFirst()
             .sink { [weak statusItemController, weak coordinator, weak settings] cells in
                 statusItemController?.updateCells(
-                    cells.ordered,
+                    cells,
                     activityArrows: settings?.arrowActivityIndicator ?? true
                 )
                 coordinator?.configureIdleSamplers(
@@ -94,7 +94,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings.$arrowActivityIndicator.dropFirst()
             .sink { [weak statusItemController, weak settings] on in
                 statusItemController?.updateCells(
-                    settings?.barCells.ordered ?? [.cpu, .mem],
+                    settings?.barCells ?? [.cpu, .mem],
                     activityArrows: on
                 )
             }

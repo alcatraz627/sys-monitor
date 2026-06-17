@@ -5,8 +5,19 @@ import AppKit
 /// `net` / `disk` render as: icon · ↓green-arrow value · ↑red-arrow value.
 /// (GPU/power lives in the panel's POWER row via IOReport, not the bar —
 /// a watts cell would break the bar's fixed-width grammar.)
-public enum BarCell: Sendable, Hashable {
+public enum BarCell: String, Sendable, Hashable, CaseIterable, Codable {
     case cpu, mem, net, disk
+
+    /// Human label for the settings list. The bar itself draws an icon,
+    /// not this text.
+    public var displayName: String {
+        switch self {
+        case .cpu:  return "CPU"
+        case .mem:  return "Memory"
+        case .net:  return "Network"
+        case .disk: return "Disk I/O"
+        }
+    }
 }
 
 /// Renders the cells into a fixed-width `NSImage` for the status-item

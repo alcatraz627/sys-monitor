@@ -35,6 +35,13 @@ Mark a row failed → it's a one-line bug report back to me.
 - [ ] **filters** — `>5:cpu`, `<300:mem`, `>1:disk`, `>1:net`, a pid number,
       and a name substring each filter as expected.
 
+## Settings — v2.1 additions
+- [ ] **bar-cell reorder (9.4)** — Settings ▸ Menu bar: the enabled metrics show
+      a numbered, ordered list with ▲/▼ buttons. Reorder → the menu-bar glyph
+      redraws cells in the new order live; chevrons disable at the ends; order
+      survives quit+relaunch. Disabling down to one cell shows the "at least one"
+      note and refuses to remove the last.
+
 ## Window / lifecycle
 - [ ] **Esc** closes the panel; **right-click** the menu-bar icon → Settings/Quit.
 - [ ] **resize** — drag the panel's bottom edge; height persists across reopen.
