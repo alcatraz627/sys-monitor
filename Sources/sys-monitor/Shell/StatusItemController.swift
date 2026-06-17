@@ -80,6 +80,10 @@ final class StatusItemController {
         subscription = store.$snapshot.sink { [weak self] snap in
             self?.redraw(snapshot: snap)
         }
+
+        // Now that all stored properties are set, hand the click target a
+        // way to read the current top consumer for its menu header.
+        target.topConsumer = { [weak self] in self?.topConsumerText() }
     }
 
     /// Runtime settings changes. Each updates one input and rebuilds the
@@ -141,7 +145,20 @@ final class StatusItemController {
         }
         lastRenderKey = key
         button.image = renderer.render(snapshot: snapshot)
-        button.setAccessibilityValue(renderer.accessibilityValue(snapshot: snapshot))
+        var a11y = renderer.accessibilityValue(snapshot: snapshot)
+        if let top = topConsumerText() { a11y = "Top process \(top). " + a11y }
+        button.setAccessibilityValue(a11y)
+    }
+
+    /// "Chrome — 84%" for the busiest process, or nil when no process data
+    /// exists yet (the idle tier never enumerates processes, so this is
+    /// populated only once the panel has been opened this session).
+    func topConsumerText() -> String? {
+        guard case .ok(let procs) = store.snapshot.processes,
+              let top = procs.max(by: { $0.cpu < $1.cpu }), top.cpu > 0.01
+        else { return nil }
+        let name = top.name.isEmpty ? "pid \(top.pid)" : top.name
+        return "\(name) — \(Int((top.cpu * 100).rounded()))%"
     }
 }
 
@@ -154,6 +171,10 @@ private final class ClickTarget: NSObject {
     private let handler: () -> Void
     private let onShowSettings: () -> Void
     private weak var statusItem: NSStatusItem?
+    /// Returns the busiest process ("Chrome — 84%") for the menu header, or
+    /// nil when no process data exists. Set after init (capturing the owner
+    /// during init would reference self before it's fully initialized).
+    var topConsumer: (() -> String?)?
 
     init(
         handler: @escaping () -> Void,
@@ -176,6 +197,15 @@ private final class ClickTarget: NSObject {
     private func showMenu() {
         guard let button = statusItem?.button else { return }
         let menu = NSMenu()
+        // Top-consumer header (disabled, informational) — only when process
+        // data exists. The menu-bar tooltip can't show this (macOS suppresses
+        // tooltips for nonactivating accessory apps), so the menu is its home.
+        if let top = topConsumer?() {
+            let header = NSMenuItem(title: "Top: \(top)", action: nil, keyEquivalent: "")
+            header.isEnabled = false
+            menu.addItem(header)
+            menu.addItem(.separator())
+        }
         let settings = NSMenuItem(
             title: "Settings…", action: #selector(menuShowSettings), keyEquivalent: ""
         )

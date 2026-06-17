@@ -80,6 +80,14 @@ Mark a row failed → it's a one-line bug report back to me.
       POWER/BATTERY/LOAD lines + top-5 processes, using the on-screen formatted
       values at the current throughput unit (bytes vs bits).
 
+## Menu bar — v2.1
+- [ ] **top consumer in menu (6.2)** — open the panel once (so process data is
+      gathered), then right-click the menu-bar icon: a disabled "Top: <name> — N%"
+      header tops the menu (busiest process). It's absent before the panel has
+      ever been opened (idle tier doesn't enumerate processes). VoiceOver on the
+      icon also announces the top process. (No hover tooltip — macOS suppresses
+      those for accessory apps; the menu is the substitute.)
+
 ## Process interactions — v2.1
 - [ ] **watch a process / pin (8.1)** — expand a row → a pin icon appears as the
       first action. Click it: the row jumps to the top of the list and stays
