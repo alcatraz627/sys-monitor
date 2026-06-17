@@ -36,6 +36,9 @@ public final class SamplingCoordinator: @unchecked Sendable {
     private let batterySampler = BatterySampler()
     private let diskSpaceSampler = DiskSpaceSampler()
     private let loadSampler = LoadSampler()
+    /// Per-interface NET rates from the last successful net read — additive
+    /// to the aggregate (which keeps its own field-bug-fixed rate path).
+    private var lastPerInterfaceNet: [InterfaceThroughput] = []
 
     // MARK: - Serial-queue-isolated state
 
@@ -509,7 +512,8 @@ public final class SamplingCoordinator: @unchecked Sendable {
             // Panel-tier facts — only read while the panel is open, since
             // nothing renders them otherwise.
             diskSpace: diskSpaceSampler.read(),
-            loadAverage: loadSampler.read()
+            loadAverage: loadSampler.read(),
+            perInterfaceNet: lastPerInterfaceNet
         )
     }
 
@@ -571,9 +575,11 @@ public final class SamplingCoordinator: @unchecked Sendable {
         // of bytes over one tick's elapsed — an N× rate spike on recovery.
         do { counters = try netSampler.read() } catch {
             prevNet = nil
+            lastPerInterfaceNet = []
             return .unavailable
         }
         defer { prevNet = counters }
+        lastPerInterfaceNet = []   // cleared unless this tick produces a rate
 
         guard let prev = prevNet, !isGap else { return .measuring }
         // Interface set changed (VPN flip, USB plug) → treat as gap.
@@ -583,7 +589,26 @@ public final class SamplingCoordinator: @unchecked Sendable {
             let outBps = RateMath.bytesPerSec(prev: prev.outBytes, now: counters.outBytes, elapsed: elapsed)
         else { return .measuring }
         netHistory.append(HistoryPoint(timestamp: now, value: Self.throughputFrac(inBps + outBps)))
+        lastPerInterfaceNet = Self.perInterfaceRates(prev: prev, now: counters, elapsed: elapsed)
         return .ok(Throughput(inPerSec: inBps, outPerSec: outBps))
+    }
+
+    /// Per-interface rates from two cumulative readings. Skips interfaces
+    /// absent from the prior reading (just appeared) and idle ones; sorted
+    /// busiest-first. Pure — no instance state — so it's unit-testable.
+    static func perInterfaceRates(prev: NetCounters, now: NetCounters,
+                                  elapsed: TimeInterval) -> [InterfaceThroughput] {
+        guard elapsed > 0 else { return [] }
+        var out: [InterfaceThroughput] = []
+        for (name, cur) in now.perInterface {
+            guard let p = prev.perInterface[name],
+                  let inBps  = RateMath.bytesPerSec(prev: p.inBytes,  now: cur.inBytes,  elapsed: elapsed),
+                  let outBps = RateMath.bytesPerSec(prev: p.outBytes, now: cur.outBytes, elapsed: elapsed)
+            else { continue }
+            if inBps + outBps < 1 { continue }   // hide idle interfaces
+            out.append(InterfaceThroughput(name: name, inPerSec: inBps, outPerSec: outBps))
+        }
+        return out.sorted { ($0.inPerSec + $0.outPerSec) > ($1.inPerSec + $1.outPerSec) }
     }
 
     /// Log-normalize bytes/sec into 0…1 for the sparkline. Mirrors the
@@ -706,7 +731,8 @@ public final class SamplingCoordinator: @unchecked Sendable {
         power: Metric<PowerSample>,
         battery: BatterySample?,
         diskSpace: DiskSpaceSample? = nil,
-        loadAverage: LoadAverage? = nil
+        loadAverage: LoadAverage? = nil,
+        perInterfaceNet: [InterfaceThroughput] = []
     ) {
         generation &+= 1
         if debugTicks {
@@ -730,6 +756,7 @@ public final class SamplingCoordinator: @unchecked Sendable {
             battery: battery,
             diskSpace: diskSpace,
             loadAverage: loadAverage,
+            perInterfaceNet: perInterfaceNet,
             cpuHistory: cpuHistory,
             memHistory: memHistory,
             netHistory: netHistory,

@@ -63,6 +63,13 @@ public struct DiskSpaceSample: Sendable, Equatable {
     public let totalBytes: UInt64
 }
 
+/// One interface's throughput for the per-interface NET breakdown.
+public struct InterfaceThroughput: Sendable, Equatable {
+    public let name: String
+    public let inPerSec: Double
+    public let outPerSec: Double
+}
+
 /// System load averages (1 / 5 / 15 min) plus uptime — the htop footer line.
 /// Load is "runnable + uncomputable threads," not a percentage; a value near
 /// the core count means fully busy.

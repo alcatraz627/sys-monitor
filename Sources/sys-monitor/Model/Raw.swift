@@ -45,6 +45,26 @@ public struct NetCounters: Sendable {
     public let inBytes: UInt64
     public let outBytes: UInt64
     public let ifaceSet: Set<String>
+    /// Cumulative in/out bytes per interface NAME (en0, utun3, …). Feeds the
+    /// optional per-interface breakdown; the aggregate above is independent
+    /// of it (and stays the field-bug-fixed rate path).
+    public let perInterface: [String: NetIfaceBytes]
+
+    public init(inBytes: UInt64, outBytes: UInt64, ifaceSet: Set<String>,
+                perInterface: [String: NetIfaceBytes] = [:]) {
+        self.inBytes = inBytes
+        self.outBytes = outBytes
+        self.ifaceSet = ifaceSet
+        self.perInterface = perInterface
+    }
+}
+
+public struct NetIfaceBytes: Sendable {
+    public let inBytes: UInt64
+    public let outBytes: UInt64
+    public init(inBytes: UInt64, outBytes: UInt64) {
+        self.inBytes = inBytes; self.outBytes = outBytes
+    }
 }
 
 /// One raw process reading. `cpuTimeNs` is `pti_total_user + pti_total_system`

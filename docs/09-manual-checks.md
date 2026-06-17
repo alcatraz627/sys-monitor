@@ -119,6 +119,12 @@ Mark a row failed → it's a one-line bug report back to me.
       the menu-bar readout should keep updating (2.8 — never verified).
 
 ## Needs a real (un-throttled) network
+- [ ] **per-interface split (7.3)** — bring up a VPN (or plug in USB ethernet) so
+      ≥2 interfaces carry traffic, then start a download. A small per-interface
+      list (en0 / utun3 / …) appears under the NET row, each with ↓/↑ rates, busiest
+      first; idle interfaces are omitted. The per-interface rates should sum to
+      roughly the aggregate NET row. With only one active interface the list is
+      hidden (the aggregate already says it all).
 - [ ] **per-process NET** — start a real download, sort the list by NET; the
       downloader should top the list. If it shows under a relay process
       (`nesessionmanager`) instead, that's the VPN/Private-Relay platform

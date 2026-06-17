@@ -300,6 +300,35 @@ func runSelfTest() -> Int32 {
         check("load sampler returns a value", false, "got nil")
     }
 
+    print("Network per-interface split (7.3)")
+    if let nc = try? NetworkSampler().read() {
+        let sumIn  = nc.perInterface.values.reduce(UInt64(0)) { $0 &+ $1.inBytes }
+        let sumOut = nc.perInterface.values.reduce(UInt64(0)) { $0 &+ $1.outBytes }
+        // The split is a subset of the aggregate (a name lookup can drop one),
+        // so it must never exceed it.
+        check("per-interface in-bytes sum ≤ aggregate", sumIn <= nc.inBytes, "sum \(sumIn) agg \(nc.inBytes)")
+        check("per-interface out-bytes sum ≤ aggregate", sumOut <= nc.outBytes, "sum \(sumOut) agg \(nc.outBytes)")
+        check("at least one named interface", !nc.perInterface.isEmpty)
+    } else {
+        check("NetworkSampler reads", false, "threw")
+    }
+    do {
+        let prev = NetCounters(inBytes: 0, outBytes: 0, ifaceSet: ["if1", "if2"], perInterface: [
+            "en0":   NetIfaceBytes(inBytes: 0,    outBytes: 0),
+            "utun0": NetIfaceBytes(inBytes: 1000, outBytes: 1000),
+        ])
+        let now = NetCounters(inBytes: 0, outBytes: 0, ifaceSet: ["if1", "if2"], perInterface: [
+            "en0":   NetIfaceBytes(inBytes: 1_048_576, outBytes: 0),
+            "utun0": NetIfaceBytes(inBytes: 1000, outBytes: 1000),   // unchanged → idle
+        ])
+        let rates = SamplingCoordinator.perInterfaceRates(prev: prev, now: now, elapsed: 1.0)
+        check("per-interface rate computes en0 download",
+              rates.contains { $0.name == "en0" && abs($0.inPerSec - 1_048_576) < 1 },
+              "got \(rates)")
+        check("idle interface is dropped from the split",
+              !rates.contains { $0.name == "utun0" }, "got \(rates)")
+    }
+
     print(failures == 0 ? "\nALL PASS" : "\n\(failures) FAILURE(S)")
     return failures == 0 ? 0 : 1
 }

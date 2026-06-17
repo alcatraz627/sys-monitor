@@ -17,6 +17,7 @@ public struct MetricsSnapshot: Sendable, Equatable {
     public var battery: BatterySample?   // nil on desktops or while unread
     public var diskSpace: DiskSpaceSample? = nil   // boot volume; panel-tier only
     public var loadAverage: LoadAverage? = nil     // load + uptime; panel-tier only
+    public var perInterfaceNet: [InterfaceThroughput] = []  // NET breakdown; panel-tier
     public var cpuHistory: RingBuffer
     public var memHistory: RingBuffer
     public var netHistory: RingBuffer

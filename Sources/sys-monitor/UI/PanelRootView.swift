@@ -97,6 +97,7 @@ struct PanelRootView: View {
             memorySection
             divider
             netDiskRow
+            netInterfaceBreakdown
             if store.snapshot.diskSpace != nil {
                 divider
                 storageRow
@@ -223,6 +224,34 @@ struct PanelRootView: View {
             }
         }
         return .secondary
+    }
+
+    /// Per-interface NET split — shown only when ≥2 interfaces carry traffic
+    /// (with one, the aggregate already tells the whole story).
+    @ViewBuilder
+    private var netInterfaceBreakdown: some View {
+        let ifaces = store.snapshot.perInterfaceNet
+        if ifaces.count >= 2 {
+            VStack(alignment: .leading, spacing: 1) {
+                ForEach(ifaces, id: \.name) { i in
+                    HStack(spacing: 6) {
+                        Text(i.name)
+                            .font(DesignTokens.numericFont(size: 9, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 52, alignment: .leading)
+                        Text("↓\(formatBps(i.inPerSec, unit: settings.throughputUnit).trimmingCharacters(in: .whitespaces))")
+                            .font(DesignTokens.numericFont(size: 9))
+                            .foregroundStyle(.tertiary)
+                        Text("↑\(formatBps(i.outPerSec, unit: settings.throughputUnit).trimmingCharacters(in: .whitespaces))")
+                            .font(DesignTokens.numericFont(size: 9))
+                            .foregroundStyle(.tertiary)
+                        Spacer()
+                    }
+                }
+            }
+            .padding(.top, 1)
+            .explain("Network throughput split by interface (Wi-Fi, VPN, USB, …). Only interfaces with current traffic appear.")
+        }
     }
 
     private var netDiskRow: some View {

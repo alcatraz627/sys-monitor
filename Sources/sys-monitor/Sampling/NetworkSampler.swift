@@ -26,6 +26,7 @@ public struct NetworkSampler: Sampler {
         var inBytes: UInt64 = 0
         var outBytes: UInt64 = 0
         var ifaces: Set<String> = []
+        var perInterface: [String: NetIfaceBytes] = [:]
 
         buffer.withUnsafeBytes { rawBuf in
             guard let base = rawBuf.baseAddress else { return }
@@ -47,12 +48,22 @@ public struct NetworkSampler: Sampler {
                         inBytes  &+= if2.ifm_data.ifi_ibytes
                         outBytes &+= if2.ifm_data.ifi_obytes
                         ifaces.insert("if\(if2.ifm_index)")
+                        // Resolve the index to a name (en0, utun3, …) for the
+                        // per-interface breakdown. A failed lookup just omits
+                        // that interface from the split, not the aggregate.
+                        var nameBuf = [CChar](repeating: 0, count: Int(IF_NAMESIZE))
+                        if if_indextoname(UInt32(if2.ifm_index), &nameBuf) != nil {
+                            perInterface[String(cString: nameBuf)] = NetIfaceBytes(
+                                inBytes: if2.ifm_data.ifi_ibytes,
+                                outBytes: if2.ifm_data.ifi_obytes)
+                        }
                     }
                 }
                 offset += msglen
             }
         }
 
-        return NetCounters(inBytes: inBytes, outBytes: outBytes, ifaceSet: ifaces)
+        return NetCounters(inBytes: inBytes, outBytes: outBytes, ifaceSet: ifaces,
+                           perInterface: perInterface)
     }
 }
