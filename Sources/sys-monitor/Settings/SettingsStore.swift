@@ -47,6 +47,7 @@ public final class SettingsStore: ObservableObject {
     private static let kArrowActivity = "arrowActivityIndicator"
     private static let kPanelHeight = "panelHeight"
     private static let kPanelPinned = "panelPinned"
+    private static let kThroughputUnit = "throughputUnit"
 
     @Published public var idleCadenceSeconds: Double {
         didSet {
@@ -91,6 +92,13 @@ public final class SettingsStore: ObservableObject {
         didSet { defaults.set(panelPinned, forKey: Self.kPanelPinned) }
     }
 
+    /// Whether throughput reads as bytes/s (default — matches Activity
+    /// Monitor and disk benchmarks) or bits/s (matches NIC / ISP quoting).
+    /// Applies to both the glyph cells and the panel's NET/DISK rows.
+    @Published public var throughputUnit: ThroughputUnit {
+        didSet { defaults.set(throughputUnit.rawValue, forKey: Self.kThroughputUnit) }
+    }
+
     /// Read-only status of the actual login-item registration, refreshed
     /// after a register/unregister call. The setting (above) is the user's
     /// *intent*; this is what `SMAppService` actually believes.
@@ -131,6 +139,8 @@ public final class SettingsStore: ObservableObject {
         let storedHeight = (defaults.object(forKey: Self.kPanelHeight) as? Double) ?? 480
         self.panelHeight = min(max(storedHeight, 320), 900)
         self.panelPinned = defaults.bool(forKey: Self.kPanelPinned)
+        self.throughputUnit = ThroughputUnit(rawValue: defaults.string(forKey: Self.kThroughputUnit) ?? "")
+            ?? .bytesPerSec
     }
 
     /// idle cadence must be >= open cadence (idle is the always-on budget

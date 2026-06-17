@@ -97,6 +97,19 @@ func runSelfTest() -> Int32 {
         let s = GlyphRenderer.formatBps(v)
         check("formatBps \(name) is 5 chars", s.count == 5, "got \"\(s)\" (\(s.count))")
     }
+    // bits/s mode (9.1): same width invariant must hold for the ×8 path, and
+    // the unit letter must be lowercase 'b'. A few values also push a tier
+    // higher than their byte form (×8), exercising the KB→MB→GB carries.
+    print("GlyphRenderer.formatBps — bits/s mode width-safe (9.1)")
+    for (name, v) in boundaries where v >= 0 {
+        let s = GlyphRenderer.formatBps(v, unit: .bitsPerSec)
+        check("formatBps bits \(name) is 5 chars", s.count == 5, "got \"\(s)\" (\(s.count))")
+        check("formatBps bits \(name) uses 'b' not 'B'", !s.contains("B"), "got \"\(s)\"")
+    }
+    // Spot-check the ×8 scaling crosses a tier: 200 KB/s = 1600 Kb/s ≈ 1.6 Mb/s.
+    check("bits scaling crosses tier (200KB/s → ~1.6Mb/s)",
+          GlyphRenderer.formatBps(200 * 1024, unit: .bitsPerSec).contains("Mb"),
+          "got \"\(GlyphRenderer.formatBps(200 * 1024, unit: .bitsPerSec))\"")
 
     print("SettingsStore — bar-cell migration + reorder (9.4)")
     // Fresh store backed by an isolated, cleared defaults suite.

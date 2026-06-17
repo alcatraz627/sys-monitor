@@ -41,6 +41,11 @@ Mark a row failed → it's a one-line bug report back to me.
       redraws cells in the new order live; chevrons disable at the ends; order
       survives quit+relaunch. Disabling down to one cell shows the "at least one"
       note and refuses to remove the last.
+- [ ] **throughput units (9.1)** — Settings ▸ Menu bar ▸ Throughput units: flip
+      Bytes/s ↔ Bits/s. The NET/DISK glyph cells AND the panel's NET/DISK rows +
+      per-process disk/net columns all switch together, live. Bits show a
+      lowercase `b` (e.g. `12Mb/s`), bytes an uppercase `B`. Cell width stays
+      stable (no menu-bar reflow jitter). Setting survives relaunch.
 
 ## Window / lifecycle
 - [ ] **Esc** closes the panel; **right-click** the menu-bar icon → Settings/Quit.

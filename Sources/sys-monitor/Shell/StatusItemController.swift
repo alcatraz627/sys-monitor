@@ -12,6 +12,12 @@ import os
 final class StatusItemController {
     let statusItem: NSStatusItem
     private let store: MetricsStore
+    // The three glyph inputs the user can change at runtime. Each has its
+    // own setter; any change rebuilds the renderer (cheap — it just
+    // re-measures reserved widths) and forces a fresh frame.
+    private var cells: [BarCell]
+    private var activityArrows: Bool
+    private var throughputUnit: ThroughputUnit
     private var renderer: GlyphRenderer
     private var subscription: AnyCancellable?
     private var clickTarget: ClickTarget?
@@ -32,11 +38,16 @@ final class StatusItemController {
         store: MetricsStore,
         cells: [BarCell] = [.cpu, .mem],
         activityArrows: Bool = true,
+        throughputUnit: ThroughputUnit = .bytesPerSec,
         onClick: @escaping () -> Void,
         onShowSettings: @escaping () -> Void
     ) {
         self.store = store
-        self.renderer = GlyphRenderer(cells: cells, activityArrows: activityArrows)
+        self.cells = cells
+        self.activityArrows = activityArrows
+        self.throughputUnit = throughputUnit
+        self.renderer = GlyphRenderer(cells: cells, activityArrows: activityArrows,
+                                      throughputUnit: throughputUnit)
         self.statusItem = NSStatusBar.system.statusItem(
             withLength: NSStatusItem.variableLength
         )
@@ -68,11 +79,25 @@ final class StatusItemController {
         }
     }
 
-    /// Swap the bar-cell layout at runtime (settings change). Rebuilds
-    /// the renderer with new reserved-width and per-cell rules, then
-    /// redraws against the current snapshot.
-    func updateCells(_ cells: [BarCell], activityArrows: Bool) {
-        renderer = GlyphRenderer(cells: cells, activityArrows: activityArrows)
+    /// Runtime settings changes. Each updates one input and rebuilds the
+    /// renderer; the rebuild is cheap (it re-measures reserved widths) and
+    /// resetting `lastRenderKey` guarantees the next frame draws.
+    func updateCells(_ cells: [BarCell]) {
+        self.cells = cells
+        rebuildRenderer()
+    }
+    func updateActivityArrows(_ on: Bool) {
+        self.activityArrows = on
+        rebuildRenderer()
+    }
+    func updateThroughputUnit(_ unit: ThroughputUnit) {
+        self.throughputUnit = unit
+        rebuildRenderer()
+    }
+
+    private func rebuildRenderer() {
+        renderer = GlyphRenderer(cells: cells, activityArrows: activityArrows,
+                                 throughputUnit: throughputUnit)
         lastRenderKey = nil
         redraw(snapshot: store.snapshot)
     }

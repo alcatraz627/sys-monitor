@@ -756,6 +756,7 @@ private struct CoreStrip: View {
 }
 
 private struct ThroughputCell: View {
+    @EnvironmentObject var settings: SettingsStore
     let label: String
     let metric: Metric<Throughput>
     let activity: Bool
@@ -799,8 +800,8 @@ private struct ThroughputCell: View {
         if case .ok(let t) = metric { return max(0, t.outPerSec) }
         return -1
     }
-    private var inText: String  { formatBps(inBps) }
-    private var outText: String { formatBps(outBps) }
+    private var inText: String  { formatBps(inBps, unit: settings.throughputUnit) }
+    private var outText: String { formatBps(outBps, unit: settings.throughputUnit) }
 
     /// Same brightness + saturation treatment the menu-bar widget uses,
     /// implemented in NSColor (macOS 13 compatible — SwiftUI's
@@ -828,6 +829,7 @@ private struct ThroughputCell: View {
 }
 
 private struct ProcessList: View {
+    @EnvironmentObject var settings: SettingsStore
     let metric: Metric<[ProcSample]>
     let ranked: [ProcSample]
     let sortBy: PanelRootView.ProcSort
@@ -991,8 +993,8 @@ private struct ProcessList: View {
     /// Third-column value text — whatever metric the list is sorted by.
     private func thirdColumnText(_ p: ProcSample) -> String {
         switch sortBy {
-        case .disk: return formatBps(p.diskBps)
-        case .net:  return formatBps(p.netBps)
+        case .disk: return formatBps(p.diskBps, unit: settings.throughputUnit)
+        case .net:  return formatBps(p.netBps, unit: settings.throughputUnit)
         default:    return String(format: "%.1f%%", p.cpu * 100)
         }
     }
@@ -1382,10 +1384,10 @@ private struct ExpandedRow: View {
 // "/s", so panel numbers stop jittering sideways every tick. The one
 // divergence: the glyph renders zero as blank (its arrow opacity speaks
 // for it); the panel has no second channel, so zero shows explicitly.
-private func formatBps(_ bps: Double) -> String {
+private func formatBps(_ bps: Double, unit: ThroughputUnit) -> String {
     if bps < 0  { return "—" }
-    if bps < 50 { return "  0KB/s" }
-    return GlyphRenderer.formatBps(bps) + "/s"
+    if bps < 50 { return "  0K\(unit.letter)/s" }
+    return GlyphRenderer.formatBps(bps, unit: unit) + "/s"
 }
 
 private func formatBytes(_ bytes: Double) -> String {

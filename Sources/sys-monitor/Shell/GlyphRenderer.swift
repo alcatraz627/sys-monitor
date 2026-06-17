@@ -20,6 +20,26 @@ public enum BarCell: String, Sendable, Hashable, CaseIterable, Codable {
     }
 }
 
+/// How throughput numbers are displayed everywhere they appear (the glyph
+/// cells and the panel's NET/DISK rows). Networking is conventionally
+/// quoted in bits/s, storage in bytes/s — different users expect
+/// different defaults, so it's a single app-wide preference.
+public enum ThroughputUnit: String, Sendable, Hashable, CaseIterable, Codable {
+    case bytesPerSec, bitsPerSec
+
+    public var displayName: String {
+        switch self {
+        case .bytesPerSec: return "Bytes/s"
+        case .bitsPerSec:  return "Bits/s"
+        }
+    }
+
+    /// Bits are 8× the byte count; the unit letter switches B→b. Both keep
+    /// the K/M/G tier letter, so the 5-char width grammar is identical.
+    var scale: Double { self == .bitsPerSec ? 8 : 1 }
+    var letter: String { self == .bitsPerSec ? "b" : "B" }
+}
+
 /// Renders the cells into a fixed-width `NSImage` for the status-item
 /// button. Grouping follows gestalt by proximity: elements within a cell
 /// are tight; the gap between cells is ~1.5× wider.
@@ -29,6 +49,8 @@ public struct GlyphRenderer {
     /// When true, the throughput arrows dim/brighten on a log scale of
     /// their current rate — visual "level of activity" without animation.
     public let activityArrows: Bool
+    /// Bytes/s or bits/s for the NET / DISK cells.
+    public let throughputUnit: ThroughputUnit
     private let valueFont: NSFont
     private let arrowFont: NSFont
     private let arrowW: CGFloat
@@ -60,10 +82,12 @@ public struct GlyphRenderer {
         }
     }
 
-    public init(cells: [BarCell] = [.cpu, .mem], activityArrows: Bool = true) {
+    public init(cells: [BarCell] = [.cpu, .mem], activityArrows: Bool = true,
+                throughputUnit: ThroughputUnit = .bytesPerSec) {
         let effective = cells.isEmpty ? [.cpu] : cells
         self.cells = effective
         self.activityArrows = activityArrows
+        self.throughputUnit = throughputUnit
         let vFont = NSFont.monospacedDigitSystemFont(ofSize: Self.valuePt, weight: .medium)
         let aFont = NSFont.systemFont(ofSize: Self.arrowPt, weight: .semibold)
         self.valueFont = vFont
@@ -106,10 +130,10 @@ public struct GlyphRenderer {
                 parts.append("m\(state(snapshot.memory))\(Self.memPercentText(snapshot))|\(Int(load * 32))|\(sev)")
             case .net:
                 let d = Self.netDownBps(snapshot), u = Self.netUpBps(snapshot)
-                parts.append("n\(state(snapshot.net))\(Self.formatBps(d))|\(Self.formatBps(u))|\(Int(Self.activityFrac(bps: d) * 32))|\(Int(Self.activityFrac(bps: u) * 32))")
+                parts.append("n\(state(snapshot.net))\(fmt(d))|\(fmt(u))|\(Int(Self.activityFrac(bps: d) * 32))|\(Int(Self.activityFrac(bps: u) * 32))")
             case .disk:
                 let r = Self.diskReadBps(snapshot), w = Self.diskWriteBps(snapshot)
-                parts.append("d\(state(snapshot.disk))\(Self.formatBps(r))|\(Self.formatBps(w))|\(Int(Self.activityFrac(bps: r) * 32))|\(Int(Self.activityFrac(bps: w) * 32))")
+                parts.append("d\(state(snapshot.disk))\(fmt(r))|\(fmt(w))|\(Int(Self.activityFrac(bps: r) * 32))|\(Int(Self.activityFrac(bps: w) * 32))")
             }
         }
         return parts.joined(separator: ";")
@@ -164,13 +188,13 @@ public struct GlyphRenderer {
             return Self.iconPt + Self.elementGap + Self.barW + Self.elementGap + textW
         case .net:
             return throughputCellWidth(
-                downText: Self.formatBps(Self.netDownBps(snapshot)),
-                upText:   Self.formatBps(Self.netUpBps(snapshot))
+                downText: fmt(Self.netDownBps(snapshot)),
+                upText:   fmt(Self.netUpBps(snapshot))
             )
         case .disk:
             return throughputCellWidth(
-                downText: Self.formatBps(Self.diskReadBps(snapshot)),
-                upText:   Self.formatBps(Self.diskWriteBps(snapshot))
+                downText: fmt(Self.diskReadBps(snapshot)),
+                upText:   fmt(Self.diskWriteBps(snapshot))
             )
         }
     }
@@ -192,7 +216,7 @@ public struct GlyphRenderer {
     private let throughputValueReservedW: CGFloat
 
     public func accessibilityValue(snapshot: MetricsSnapshot) -> String {
-        cells.map { Self.accessibilityFor(cell: $0, snapshot: snapshot) }
+        cells.map { accessibilityFor(cell: $0, snapshot: snapshot) }
              .joined(separator: ", ")
     }
 
@@ -274,8 +298,8 @@ public struct GlyphRenderer {
                  in: NSRect(x: x, y: 0, width: Self.iconPt, height: rect.height))
         x += Self.iconPt + Self.elementGap
 
-        let downText = Self.formatBps(downBps)
-        let upText   = Self.formatBps(upBps)
+        let downText = fmt(downBps)
+        let upText   = fmt(upBps)
         let reservedW = throughputValueReservedW
         let downArrowColor = Self.arrowColor(.systemGreen, bps: downBps, activity: activityArrows)
         let upArrowColor   = Self.arrowColor(.systemRed,   bps: upBps,   activity: activityArrows)
@@ -475,42 +499,51 @@ public struct GlyphRenderer {
     // Internal, not private: the panel's throughput cells reuse this
     // exact grammar (plus a "/s" suffix) so both surfaces stay
     // width-stable and read identically.
-    static func formatBps(_ v: Double) -> String {
-        if v < 0    { return "    —" }     // measuring / unavailable
-        if v < 50   { return "     " }     // truly zero — let the arrow opacity speak
-        if v < 1024 { return "  1KB" }     // sub-KB clamps to 1KB
+    /// Instance shorthand: format at this renderer's configured unit. The
+    /// glyph's internal call sites use this so the bytes/bits choice flows
+    /// without threading the unit through every signature.
+    private func fmt(_ v: Double) -> String { Self.formatBps(v, unit: throughputUnit) }
 
-        let kb = v / 1024
+    static func formatBps(_ v: Double, unit: ThroughputUnit = .bytesPerSec) -> String {
+        if v < 0 { return "    —" }     // measuring / unavailable
+        let u = unit.letter             // "B" or "b" — width is identical
+        let scaled = v * unit.scale
+        if scaled < 50   { return "     " }       // truly zero — arrow opacity speaks
+        if scaled < 1024 { return "  1K\(u)" }    // sub-K clamps to 1K
+
+        let kb = scaled / 1024
         if kb < 999.5 {
-            if kb >= 100 { return String(format: "%3.0fKB", kb) }
-            if kb >= 10  { return String(format: " %2.0fKB", kb) }
-            return String(format: "  %.0fKB", kb)
+            if kb >= 100 { return String(format: "%3.0fK\(u)", kb) }
+            if kb >= 10  { return String(format: " %2.0fK\(u)", kb) }
+            return String(format: "  %.0fK\(u)", kb)
         }
 
-        let mb = v / 1_048_576
+        let mb = scaled / 1_048_576
         if mb < 999.5 {
-            if mb >= 100 { return String(format: "%3.0fMB", mb) }
-            if mb >= 10  { return String(format: " %2.0fMB", mb) }
-            return String(format: "%.1fMB", mb)
+            if mb >= 100 { return String(format: "%3.0fM\(u)", mb) }
+            if mb >= 10  { return String(format: " %2.0fM\(u)", mb) }
+            return String(format: "%.1fM\(u)", mb)
         }
 
-        // ≥ TB territory would re-introduce the 4-digit overflow; cap
-        // at 999GB since that's already an order of magnitude beyond
-        // any practical disk or NIC on a personal Mac.
-        let gb = min(v / 1_073_741_824, 999)
-        if gb >= 100 { return String(format: "%3.0fGB", gb) }
-        if gb >= 10  { return String(format: " %2.0fGB", gb) }
-        return String(format: "%.1fGB", gb)
+        // ≥ TB territory would re-introduce the 4-digit overflow; cap at
+        // 999G since that's already an order of magnitude beyond any
+        // practical disk or NIC on a personal Mac. (Bits/s reaches the G
+        // tier 8× sooner, but a 10 GbE NIC saturated is ~1.25 GB/s = 10 Gb/s,
+        // still inside the cap.)
+        let gb = min(scaled / 1_073_741_824, 999)
+        if gb >= 100 { return String(format: "%3.0fG\(u)", gb) }
+        if gb >= 10  { return String(format: " %2.0fG\(u)", gb) }
+        return String(format: "%.1fG\(u)", gb)
     }
 
-    private static func accessibilityFor(cell: BarCell, snapshot: MetricsSnapshot) -> String {
+    private func accessibilityFor(cell: BarCell, snapshot: MetricsSnapshot) -> String {
         switch cell {
-        case .cpu:  return "CPU \(cpuPercentText(snapshot))"
-        case .mem:  return "Memory \(memPercentText(snapshot))"
+        case .cpu:  return "CPU \(Self.cpuPercentText(snapshot))"
+        case .mem:  return "Memory \(Self.memPercentText(snapshot))"
         case .net:
-            return "Network down \(formatBps(netDownBps(snapshot))), up \(formatBps(netUpBps(snapshot)))"
+            return "Network down \(fmt(Self.netDownBps(snapshot))), up \(fmt(Self.netUpBps(snapshot)))"
         case .disk:
-            return "Disk read \(formatBps(diskReadBps(snapshot))), write \(formatBps(diskWriteBps(snapshot)))"
+            return "Disk read \(fmt(Self.diskReadBps(snapshot))), write \(fmt(Self.diskWriteBps(snapshot)))"
         }
     }
 }

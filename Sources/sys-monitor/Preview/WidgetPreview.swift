@@ -504,10 +504,11 @@ private enum WidgetVariants {
         }
     }
 
+    // Delegate to the production formatter so the design preview renders
+    // the exact width-safe grammar the real glyph uses (was a separate,
+    // variable-width copy that could drift from shipping output).
     private static func formatBps(_ v: Double) -> String {
-        if v >= 1_048_576 { return String(format: "%.0fMB", v / 1_048_576) }
-        if v >= 1_024     { return String(format: "%.0fKB", v / 1_024) }
-        return "\(Int(v))B"
+        GlyphRenderer.formatBps(v)
     }
 }
 

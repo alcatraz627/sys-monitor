@@ -73,6 +73,14 @@ struct SettingsView: View {
                 Toggle("Activity-brightness arrows (NET / DISK)",
                        isOn: $settings.arrowActivityIndicator)
                     .help("Arrow brightness scales logarithmically with throughput — dim at idle, bright at high transfer. No animation, no extra CPU.")
+
+                Picker("Throughput units", selection: $settings.throughputUnit) {
+                    ForEach(ThroughputUnit.allCases, id: \.self) { u in
+                        Text(u.displayName).tag(u)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .help("How NET / DISK rates read, in the glyph and the panel. Bytes/s matches Activity Monitor and disk benchmarks; bits/s matches NIC and ISP quoting.")
             }
 
             Section("Process list") {

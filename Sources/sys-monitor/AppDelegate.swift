@@ -43,6 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             store: store,
             cells: settings.barCells,
             activityArrows: settings.arrowActivityIndicator,
+            throughputUnit: settings.throughputUnit,
             onClick: { [weak panelController] in
                 panelController?.toggle()
             },
@@ -79,11 +80,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .store(in: &cancellables)
 
         settings.$barCells.dropFirst()
-            .sink { [weak statusItemController, weak coordinator, weak settings] cells in
-                statusItemController?.updateCells(
-                    cells,
-                    activityArrows: settings?.arrowActivityIndicator ?? true
-                )
+            .sink { [weak statusItemController, weak coordinator] cells in
+                statusItemController?.updateCells(cells)
                 coordinator?.configureIdleSamplers(
                     net:  cells.contains(.net),
                     disk: cells.contains(.disk)
@@ -92,11 +90,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .store(in: &cancellables)
 
         settings.$arrowActivityIndicator.dropFirst()
-            .sink { [weak statusItemController, weak settings] on in
-                statusItemController?.updateCells(
-                    settings?.barCells ?? [.cpu, .mem],
-                    activityArrows: on
-                )
+            .sink { [weak statusItemController] on in
+                statusItemController?.updateActivityArrows(on)
+            }
+            .store(in: &cancellables)
+
+        settings.$throughputUnit.dropFirst()
+            .sink { [weak statusItemController] unit in
+                statusItemController?.updateThroughputUnit(unit)
             }
             .store(in: &cancellables)
 
