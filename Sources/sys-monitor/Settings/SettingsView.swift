@@ -41,6 +41,7 @@ struct SettingsView: View {
                 Toggle("Memory",    isOn: cellBinding(.mem))
                 Toggle("Network",   isOn: cellBinding(.net))
                 Toggle("Disk I/O",  isOn: cellBinding(.disk))
+                Toggle("Battery",   isOn: cellBinding(.battery))
                 if settings.barCells.count == 1 {
                     Label("At least one metric must remain enabled",
                           systemImage: "info.circle")

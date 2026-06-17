@@ -41,6 +41,11 @@ Mark a row failed → it's a one-line bug report back to me.
       redraws cells in the new order live; chevrons disable at the ends; order
       survives quit+relaunch. Disabling down to one cell shows the "at least one"
       note and refuses to remove the last.
+- [ ] **battery bar cell (7.4)** — Settings ▸ Menu bar ▸ enable Battery. A battery
+      glyph + `NN%` appears in the menu bar. The symbol tracks the level
+      (0/25/50/75/100), shows a bolt while charging, and the color inverts vs the
+      other cells: green when charging/plugged or healthy, orange <40%, red <20%.
+      On a desktop (no battery) it shows `—`. Reorder it via the cell list (9.4).
 - [ ] **throughput units (9.1)** — Settings ▸ Menu bar ▸ Throughput units: flip
       Bytes/s ↔ Bits/s. The NET/DISK glyph cells AND the panel's NET/DISK rows +
       per-process disk/net columns all switch together, live. Bits show a

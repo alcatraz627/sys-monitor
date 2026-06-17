@@ -6,16 +6,17 @@ import AppKit
 /// (GPU/power lives in the panel's POWER row via IOReport, not the bar —
 /// a watts cell would break the bar's fixed-width grammar.)
 public enum BarCell: String, Sendable, Hashable, CaseIterable, Codable {
-    case cpu, mem, net, disk
+    case cpu, mem, net, disk, battery
 
     /// Human label for the settings list. The bar itself draws an icon,
     /// not this text.
     public var displayName: String {
         switch self {
-        case .cpu:  return "CPU"
-        case .mem:  return "Memory"
-        case .net:  return "Network"
-        case .disk: return "Disk I/O"
+        case .cpu:     return "CPU"
+        case .mem:     return "Memory"
+        case .net:     return "Network"
+        case .disk:    return "Disk I/O"
+        case .battery: return "Battery"
         }
     }
 }
@@ -81,6 +82,7 @@ public struct GlyphRenderer {
         case .mem:  return .systemTeal
         case .net:  return .systemPurple
         case .disk: return NSColor(red: 0.52, green: 0.65, blue: 0.80, alpha: 1) // brighter slate-blue
+        case .battery: return .systemGreen   // overridden at draw by charge color
         }
     }
 
@@ -138,6 +140,9 @@ public struct GlyphRenderer {
             case .disk:
                 let r = Self.diskReadBps(snapshot), w = Self.diskWriteBps(snapshot)
                 parts.append("d\(state(snapshot.disk))\(fmt(r))|\(fmt(w))|\(Int(Self.activityFrac(bps: r) * 32))|\(Int(Self.activityFrac(bps: w) * 32))")
+            case .battery:
+                let b = snapshot.battery.map { "\($0.percent)\($0.charging ? "c" : "")\($0.onAC ? "a" : "")" } ?? "-"
+                parts.append("b\(b)")
             }
         }
         return parts.joined(separator: ";")
@@ -200,6 +205,10 @@ public struct GlyphRenderer {
                 downText: fmt(Self.diskReadBps(snapshot)),
                 upText:   fmt(Self.diskWriteBps(snapshot))
             )
+        case .battery:
+            let textW = max(Self.measure(Self.batteryPercentText(snapshot), font: valueFont),
+                            Self.measure("100%", font: valueFont))
+            return Self.iconPt + Self.elementGap + textW
         }
     }
 
@@ -264,7 +273,28 @@ public struct GlyphRenderer {
                 upBps:   Self.diskWriteBps(snapshot),
                 identityColor: identity, in: rect
             )
+        case .battery:
+            // Icon + % only (no bar): the battery glyph already encodes the
+            // level by which symbol it picks, and the color carries severity
+            // (inverted — low charge is the warning, not high).
+            let color = Self.batteryColor(snapshot)
+            drawValueCell(symbol: Self.batterySymbol(snapshot),
+                          valueText: Self.batteryPercentText(snapshot),
+                          iconColor: color, valueColor: color, in: rect)
         }
+    }
+
+    // MARK: - Value cell (icon · value, no bar) — used by battery
+
+    private func drawValueCell(symbol: String, valueText: String,
+                               iconColor: NSColor, valueColor: NSColor, in rect: NSRect) {
+        var x = rect.minX
+        drawIcon(symbol, color: iconColor,
+                 in: NSRect(x: x, y: 0, width: Self.iconPt, height: rect.height))
+        x += Self.iconPt + Self.elementGap
+        drawText(valueText, font: valueFont, color: valueColor,
+                 in: NSRect(x: x, y: 0, width: rect.maxX - x, height: rect.height),
+                 align: .left)
     }
 
     // MARK: - Compute cell (icon · bar · %)
@@ -548,6 +578,42 @@ public struct GlyphRenderer {
             return "Network down \(fmt(Self.netDownBps(snapshot))), up \(fmt(Self.netUpBps(snapshot)))"
         case .disk:
             return "Disk read \(fmt(Self.diskReadBps(snapshot))), write \(fmt(Self.diskWriteBps(snapshot)))"
+        case .battery:
+            guard let b = snapshot.battery else { return "Battery unavailable" }
+            let st = b.charging ? " charging" : (b.onAC ? " on AC power" : "")
+            return "Battery \(b.percent)%\(st)"
+        }
+    }
+
+    // MARK: - Battery cell helpers
+
+    private static func batteryPercentText(_ s: MetricsSnapshot) -> String {
+        if let b = s.battery { return "\(b.percent)%" }
+        return "—"
+    }
+
+    /// Level-appropriate SF Symbol; the bolt variant while charging.
+    private static func batterySymbol(_ s: MetricsSnapshot) -> String {
+        guard let b = s.battery else { return "battery.0percent" }
+        if b.charging || b.charged { return "battery.100percent.bolt" }
+        switch b.percent {
+        case ..<13: return "battery.0percent"
+        case ..<38: return "battery.25percent"
+        case ..<63: return "battery.50percent"
+        case ..<88: return "battery.75percent"
+        default:    return "battery.100percent"
+        }
+    }
+
+    /// Inverted severity: a *low* charge is the warning. Plugged in or
+    /// charging always reads green regardless of level.
+    private static func batteryColor(_ s: MetricsSnapshot) -> NSColor {
+        guard let b = s.battery else { return .secondaryLabelColor }
+        if b.charging || b.charged || b.onAC { return .systemGreen }
+        switch b.percent {
+        case ..<20: return .systemRed
+        case ..<40: return .systemOrange
+        default:    return .labelColor
         }
     }
 }

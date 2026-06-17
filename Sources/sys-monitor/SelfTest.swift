@@ -219,6 +219,32 @@ func runSelfTest() -> Int32 {
               ev4.evaluate(cpuLoad: 1.0, memLoad: 1.0, now: 1).isEmpty)
     }
 
+    print("GlyphRenderer — battery cell dispatch (7.4)")
+    do {
+        let r = GlyphRenderer(cells: [.battery])
+        var snap = MetricsSnapshot.initial()
+        snap.battery = BatterySample(percent: 15, charging: false, charged: false,
+                                     onAC: false, minutesRemaining: nil)
+        check("battery a11y reflects percent",
+              r.accessibilityValue(snapshot: snap) == "Battery 15%",
+              "got \(r.accessibilityValue(snapshot: snap))")
+        check("battery renderKey encodes a discharging low charge",
+              r.renderKey(snapshot: snap).contains("b15"),
+              "got \(r.renderKey(snapshot: snap))")
+        snap.battery = BatterySample(percent: 80, charging: true, charged: false,
+                                     onAC: true, minutesRemaining: 30)
+        check("battery a11y shows charging",
+              r.accessibilityValue(snapshot: snap).contains("charging"),
+              "got \(r.accessibilityValue(snapshot: snap))")
+        check("battery renderKey distinguishes charging state",
+              r.renderKey(snapshot: snap).contains("b80c"),
+              "got \(r.renderKey(snapshot: snap))")
+        snap.battery = nil
+        check("no battery → a11y says unavailable",
+              r.accessibilityValue(snapshot: snap) == "Battery unavailable",
+              "got \(r.accessibilityValue(snapshot: snap))")
+    }
+
     print("System facts samplers (7.1 / 7.2)")
     if let ds = DiskSpaceSampler().read() {
         check("disk space: total > 0", ds.totalBytes > 0)
