@@ -10,8 +10,11 @@ Open the panel (click the menu-bar item) and walk these. ~3 minutes total.
 Mark a row failed → it's a one-line bug report back to me.
 
 ## Panel renders (Phase 4 additions)
-- [ ] **POWER row** — between NET/DISK and PROCESSES: `POWER  cpu N.NNW  gpu N.NNW`
-      (ane only when active). Numbers move under load.
+- [ ] **energy row** — between NET/DISK and PROCESSES: a battery glyph + `NN%`
+      on the left (green when charging/charged, orange/red when low+draining;
+      hover shows time-to-full/empty), and `cpu N.NNW  gpu N.NNW` watts on the
+      right (ane only when active). Numbers move under load. On a desktop the
+      left side shows the `POWER` label instead of a battery.
 - [ ] **NET/DISK sparklines** — a small log-scaled trace under each throughput
       cell; rises during a download / `dd`, flat when idle.
 - [ ] **self-cost** — footer, between the gear and power icons:

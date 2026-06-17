@@ -147,6 +147,9 @@ actionable, cheap always-on):
 - **Battery / power cell**: battery %, charging state, and (Apple
   Silicon) watts via the public `IOPSCopyPowerSourcesInfo` — cheap,
   public API, huge glance value on MacBooks. Bar cell + panel row.
+  **SHIPPED 2026-06-17** (`e14a800`): panel energy-row element (glyph +
+  %, charge-state tint, time-to-full/empty in hover), verified vs
+  `pmset`. A menu-bar *bar cell* for battery is still open if wanted.
 - **Threshold alerts**: optional notification when CPU > X% or memory
   pressure ≥ warn for N consecutive ticks (`UNUserNotificationCenter`).
   The monitor already has the data; this makes it useful while hidden.
