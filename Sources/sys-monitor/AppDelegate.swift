@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var panelController: PanelController?
     private var settingsWindowController: SettingsWindowController?
     private let alertNotifier = AlertNotifier()
+    private var globalHotkey: GlobalHotkey?
     private var cancellables = Set<AnyCancellable>()
     private var testHookSource: DispatchSourceSignal?
 
@@ -70,6 +71,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let notifier = alertNotifier
         coordinator.setAlertHandler { events in notifier.post(events) }
         coordinator.updateAlertConfig(settings.alertConfig)
+
+        // Global hotkey (⌥⌘M) toggles the panel from any app — same action
+        // as a left-click on the menu-bar icon. No Accessibility permission
+        // needed (Carbon RegisterEventHotKey).
+        let hotkey = GlobalHotkey { [weak panelController] in panelController?.toggle() }
+        hotkey.register()
+        self.globalHotkey = hotkey
 
         self.settings = settings
         self.store = store

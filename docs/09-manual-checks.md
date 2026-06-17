@@ -80,6 +80,12 @@ Mark a row failed → it's a one-line bug report back to me.
       POWER/BATTERY/LOAD lines + top-5 processes, using the on-screen formatted
       values at the current throughput unit (bytes vs bits).
 
+## Global — v2.1
+- [ ] **global hotkey (8.2)** — from another app (e.g. a browser), press ⌥⌘M.
+      The panel toggles open/closed, same as clicking the menu-bar icon. Works
+      without granting any Accessibility permission. (⌥⌘M is uncommon, so no
+      conflict with other apps' shortcuts.)
+
 ## Menu bar — v2.1
 - [ ] **top consumer in menu (6.2)** — open the panel once (so process data is
       gathered), then right-click the menu-bar icon: a disabled "Top: <name> — N%"
