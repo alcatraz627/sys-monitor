@@ -51,6 +51,11 @@ Mark a row failed → it's a one-line bug report back to me.
       per-process disk/net columns all switch together, live. Bits show a
       lowercase `b` (e.g. `12Mb/s`), bytes an uppercase `B`. Cell width stays
       stable (no menu-bar reflow jitter). Setting survives relaunch.
+- [ ] **panel display toggles + reset (9.6)** — Settings ▸ Panel display: turning
+      off Sparklines hides all four history traces; Per-core strip hides the core
+      bars; Coverage row hides the "top N of M" line — each live. Reset to defaults
+      restores every preference above (cadences, cells, thresholds, alerts, pins,
+      toggles) but leaves launch-at-login, panel size, and pin state alone.
 - [ ] **severity thresholds (9.2)** — Settings ▸ Severity thresholds: drag CPU
       warn down to ~30%. Under light load the CPU value text + glyph CPU bar +
       per-core bars all turn orange/red at the new level, live. Memory has its

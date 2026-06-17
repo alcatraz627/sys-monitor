@@ -53,6 +53,9 @@ public final class SettingsStore: ObservableObject {
     private static let kMemWarn  = "sevMemWarn"
     private static let kMemCrit  = "sevMemCritical"
     private static let kPinnedPids = "pinnedPids"
+    private static let kPerCore    = "showPerCoreStrip"
+    private static let kSparklines = "showSparklines"
+    private static let kCoverage   = "showCoverageRow"
     private static let kAlertsOn   = "alertsEnabled"
     private static let kAlertCpu   = "alertCpuThreshold"
     private static let kAlertMem   = "alertMemThreshold"
@@ -118,6 +121,18 @@ public final class SettingsStore: ObservableObject {
             defaults.set(severityThresholds.memWarn,     forKey: Self.kMemWarn)
             defaults.set(severityThresholds.memCritical, forKey: Self.kMemCrit)
         }
+    }
+
+    /// Panel display toggles — each gates an existing render path. All
+    /// default on; turning one off declutters the panel.
+    @Published public var showPerCoreStrip: Bool {
+        didSet { defaults.set(showPerCoreStrip, forKey: Self.kPerCore) }
+    }
+    @Published public var showSparklines: Bool {
+        didSet { defaults.set(showSparklines, forKey: Self.kSparklines) }
+    }
+    @Published public var showCoverageRow: Bool {
+        didSet { defaults.set(showCoverageRow, forKey: Self.kCoverage) }
     }
 
     /// Processes the user pinned to the top of the list ("watch this one"),
@@ -191,6 +206,9 @@ public final class SettingsStore: ObservableObject {
             cpuCritical: thr(Self.kCpuCrit, d.cpuCritical),
             memWarn:     thr(Self.kMemWarn, d.memWarn),
             memCritical: thr(Self.kMemCrit, d.memCritical))
+        self.showPerCoreStrip = (defaults.object(forKey: Self.kPerCore) as? Bool) ?? true
+        self.showSparklines   = (defaults.object(forKey: Self.kSparklines) as? Bool) ?? true
+        self.showCoverageRow  = (defaults.object(forKey: Self.kCoverage) as? Bool) ?? true
         let storedPins = (defaults.object(forKey: Self.kPinnedPids) as? [Int]) ?? []
         self.pinnedPids = Set(storedPins.map(Int32.init))
         let ad = AlertConfig.defaults
@@ -235,6 +253,27 @@ public final class SettingsStore: ObservableObject {
         } else if barCells.count > 1 {
             barCells.removeAll { $0 == cell }
         }
+    }
+
+    /// Restore the user-tunable preferences to their shipped defaults. Each
+    /// assignment writes through via its didSet. Deliberately leaves system
+    /// / window state alone: launch-at-login (a real OS registration),
+    /// panel height and pin (per-window prefs the user set by direct
+    /// manipulation, not in this form).
+    public func resetToDefaults() {
+        idleCadenceSeconds = 2.0
+        openCadenceSeconds = 1.0
+        barCells = Self.defaultBarCells
+        processCount = 10
+        defaultSort = .cpu
+        arrowActivityIndicator = true
+        throughputUnit = .bytesPerSec
+        severityThresholds = .defaults
+        alertConfig = .defaults
+        pinnedPids = []
+        showPerCoreStrip = true
+        showSparklines = true
+        showCoverageRow = true
     }
 
     /// Pin or unpin a process by pid (the row's "watch" toggle).

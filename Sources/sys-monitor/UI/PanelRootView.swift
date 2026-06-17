@@ -108,7 +108,9 @@ struct PanelRootView: View {
             divider
             processSection
             divider
-            statusLine
+            if settings.showCoverageRow {
+                statusLine
+            }
             loadLine
             footer
         }
@@ -161,8 +163,12 @@ struct PanelRootView: View {
             // Sparkline carries "now + recent"; the per-core strip carries
             // distribution. The overall bar was a third encoding of "now"
             // and ate vertical real estate for no extra signal.
-            GraphView(buffer: store.snapshot.cpuHistory)
-            CoreStrip(loads: cpuPerCore)
+            if settings.showSparklines {
+                GraphView(buffer: store.snapshot.cpuHistory)
+            }
+            if settings.showPerCoreStrip {
+                CoreStrip(loads: cpuPerCore)
+            }
         }
     }
 
@@ -185,9 +191,11 @@ struct PanelRootView: View {
             // keeps the trace from amplifying single-percent jitter.
             // Range labels because auto-scale renders a 2% wobble with
             // the same shape CPU uses for 0–100%.
-            GraphView(buffer: store.snapshot.memHistory,
-                      scaleMode: .auto(minSpan: 0.05),
-                      showRangeLabels: true)
+            if settings.showSparklines {
+                GraphView(buffer: store.snapshot.memHistory,
+                          scaleMode: .auto(minSpan: 0.05),
+                          showRangeLabels: true)
+            }
             HStack(spacing: DesignTokens.Space.m) {
                 Text("swap \(swapText)")
                     .explain("Swap space in use — sustained growth means RAM is oversubscribed")
@@ -914,7 +922,9 @@ private struct ThroughputCell: View {
             // Log-scaled activity sparkline (history is shape; the numbers
             // above carry the live colour). Fixed 0…1 — the buffer already
             // holds the log-normalized fraction.
-            GraphView(buffer: history, height: 16, scaleMode: .fixed(0...1))
+            if settings.showSparklines {
+                GraphView(buffer: history, height: 16, scaleMode: .fixed(0...1))
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

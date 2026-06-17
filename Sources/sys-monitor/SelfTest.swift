@@ -219,6 +219,29 @@ func runSelfTest() -> Int32 {
               ev4.evaluate(cpuLoad: 1.0, memLoad: 1.0, now: 1).isEmpty)
     }
 
+    print("SettingsStore — reset to defaults + display toggles (9.6)")
+    do {
+        let rs = freshStore("selftest.reset")
+        rs.processCount = 25
+        rs.throughputUnit = .bitsPerSec
+        rs.severityThresholds = SeverityThresholds(cpuWarn: 0.1, cpuCritical: 0.2,
+                                                   memWarn: 0.3, memCritical: 0.4)
+        rs.alertConfig = AlertConfig(enabled: true, cpuThreshold: 0.1, memThreshold: 0.1,
+                                     sustainTicks: 2, cooldownSeconds: 10)
+        rs.pinnedPids = [1, 2, 3]
+        rs.showSparklines = false
+        rs.resetToDefaults()
+        check("reset restores processCount", rs.processCount == 10)
+        check("reset restores throughputUnit", rs.throughputUnit == .bytesPerSec)
+        check("reset restores thresholds", rs.severityThresholds == .defaults)
+        check("reset restores alertConfig", rs.alertConfig == .defaults)
+        check("reset clears pins", rs.pinnedPids.isEmpty)
+        check("reset restores sparklines toggle", rs.showSparklines)
+        // a display toggle loads from its stored value
+        let dt = freshStore("selftest.disp") { $0.set(false, forKey: "showSparklines") }
+        check("display toggle loads stored false", dt.showSparklines == false)
+    }
+
     print("SettingsStore — pinned pids (8.1)")
     do {
         let suite = "selftest.pins.rt"

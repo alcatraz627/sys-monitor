@@ -126,6 +126,15 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Panel display") {
+                Toggle("Sparklines", isOn: $settings.showSparklines)
+                    .help("The small history traces under CPU / MEM / NET / DISK.")
+                Toggle("Per-core strip", isOn: $settings.showPerCoreStrip)
+                    .help("The row of one bar per CPU core under the CPU graph.")
+                Toggle("Coverage row", isOn: $settings.showCoverageRow)
+                    .help("The dim \"top N of M processes\" line below the list.")
+            }
+
             Section("Process list") {
                 Stepper(value: $settings.processCount, in: 5...25, step: 1) {
                     HStack {
@@ -157,6 +166,10 @@ struct SettingsView: View {
             }
 
             Section {
+                Button("Reset to defaults", role: .destructive) {
+                    settings.resetToDefaults()
+                }
+                .help("Restore all preferences above to their shipped defaults. Leaves launch-at-login, panel size, and pin state alone.")
                 Text("Settings apply live. Cadence changes re-baseline rate metrics for one tick (the glyph briefly shows “—”).")
                     .foregroundStyle(.secondary)
                     .font(.caption)
