@@ -132,7 +132,14 @@ final class PowerMonitor: @unchecked Sendable {
 
         var cpu = 0.0, gpu = 0.0, ane = 0.0
         for c in chans {
-            let cd = c as! CFDictionary
+            // Guarded, not force-cast: a future macOS could change the
+            // channel element type. `as? NSDictionary` is a real runtime
+            // check (nil for a non-dict); the bridge to CFDictionary is
+            // toll-free. Skip a malformed entry rather than trap the whole
+            // sampler (the adapter already degrades to unavailable if the
+            // symbols don't resolve; this guards the per-element walk).
+            guard let nd = c as? NSDictionary else { continue }
+            let cd = nd as CFDictionary
             guard (getGroup(cd)?.takeUnretainedValue() as String?) == "Energy Model" else { continue }
             let name = getName(cd)?.takeUnretainedValue() as String? ?? ""
             let unit = getUnit(cd)?.takeUnretainedValue() as String? ?? ""
