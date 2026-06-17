@@ -34,6 +34,8 @@ public final class SamplingCoordinator: @unchecked Sendable {
     private let netMonitor = PerProcessNetworkMonitor()
     private let powerMonitor = PowerMonitor()
     private let batterySampler = BatterySampler()
+    private let diskSpaceSampler = DiskSpaceSampler()
+    private let loadSampler = LoadSampler()
 
     // MARK: - Serial-queue-isolated state
 
@@ -503,7 +505,11 @@ public final class SamplingCoordinator: @unchecked Sendable {
             net: netMetric,
             disk: diskMetric,
             power: powerMetric,
-            battery: batterySampler.read()
+            battery: batterySampler.read(),
+            // Panel-tier facts — only read while the panel is open, since
+            // nothing renders them otherwise.
+            diskSpace: diskSpaceSampler.read(),
+            loadAverage: loadSampler.read()
         )
     }
 
@@ -698,7 +704,9 @@ public final class SamplingCoordinator: @unchecked Sendable {
         net: Metric<Throughput>,
         disk: Metric<Throughput>,
         power: Metric<PowerSample>,
-        battery: BatterySample?
+        battery: BatterySample?,
+        diskSpace: DiskSpaceSample? = nil,
+        loadAverage: LoadAverage? = nil
     ) {
         generation &+= 1
         if debugTicks {
@@ -720,6 +728,8 @@ public final class SamplingCoordinator: @unchecked Sendable {
             disk: disk,
             power: power,
             battery: battery,
+            diskSpace: diskSpace,
+            loadAverage: loadAverage,
             cpuHistory: cpuHistory,
             memHistory: memHistory,
             netHistory: netHistory,

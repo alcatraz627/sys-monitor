@@ -53,3 +53,22 @@ public struct BatterySample: Sendable, Equatable {
     public let onAC: Bool
     public let minutesRemaining: Int? // to full (charging) or empty (discharging); nil = calculating
 }
+
+/// Free / total space on the boot volume, from `statfs`. Panel-only and
+/// slow-changing, so it's read live each open-tier sweep (no cache — free
+/// space is mutated by every other process, so any TTL would show a
+/// plausible-but-stale number).
+public struct DiskSpaceSample: Sendable, Equatable {
+    public let freeBytes: UInt64
+    public let totalBytes: UInt64
+}
+
+/// System load averages (1 / 5 / 15 min) plus uptime — the htop footer line.
+/// Load is "runnable + uncomputable threads," not a percentage; a value near
+/// the core count means fully busy.
+public struct LoadAverage: Sendable, Equatable {
+    public let one: Double
+    public let five: Double
+    public let fifteen: Double
+    public let uptimeSeconds: TimeInterval
+}

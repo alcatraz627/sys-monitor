@@ -62,6 +62,19 @@ Mark a row failed → it's a one-line bug report back to me.
       Alerts fire with the panel closed (that's the point). Config survives
       relaunch; disabling stops all alerts.
 
+## Panel signals — v2.1
+- [ ] **storage row (7.1)** — between DISK throughput and PROCESSES: a `STORAGE`
+      row with a fullness bar + "NNN GB free". Matches `df -h /` within rounding.
+      Bar greens/oranges/reds as the disk fills (test thresholds via a full-ish
+      volume if available). Hover shows used-of-total.
+- [ ] **load + uptime (7.2)** — a dim line below the coverage count:
+      `load N.NN N.NN N.NN · up Xd Yh`. The three numbers match `uptime`; the
+      uptime matches roughly. Updates while the panel is open.
+- [ ] **copy snapshot (8.3)** — the doc-on-doc footer button (next to the gear).
+      Click it, paste into an editor → a text block with CPU/MEM/NET/DISK/STORAGE/
+      POWER/BATTERY/LOAD lines + top-5 processes, using the on-screen formatted
+      values at the current throughput unit (bytes vs bits).
+
 ## Window / lifecycle
 - [ ] **Esc** closes the panel; **right-click** the menu-bar icon → Settings/Quit.
 - [ ] **resize** — drag the panel's bottom edge; height persists across reopen.

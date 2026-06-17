@@ -97,6 +97,10 @@ struct PanelRootView: View {
             memorySection
             divider
             netDiskRow
+            if store.snapshot.diskSpace != nil {
+                divider
+                storageRow
+            }
             if store.snapshot.battery != nil || store.snapshot.powerAvailable {
                 divider
                 energyRow
@@ -105,6 +109,7 @@ struct PanelRootView: View {
             processSection
             divider
             statusLine
+            loadLine
             footer
         }
         .environmentObject(hoverHelp)
@@ -512,14 +517,116 @@ struct PanelRootView: View {
             .frame(height: 12)
     }
 
+    /// Boot-volume capacity (distinct from the DISK throughput row above,
+    /// which is read/write *rate*). The bar fills and colours with how full
+    /// the disk is, so a nearly-full disk reads red.
+    @ViewBuilder
+    private var storageRow: some View {
+        if let d = store.snapshot.diskSpace {
+            let used = d.totalBytes >= d.freeBytes ? d.totalBytes - d.freeBytes : 0
+            let frac = d.totalBytes > 0 ? Double(used) / Double(d.totalBytes) : 0
+            HStack(spacing: DesignTokens.Space.s) {
+                Text("STORAGE")
+                    .font(DesignTokens.numericFont(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                UsageBar(load: frac, height: 6)
+                Spacer()
+                Text("\(formatBytes(Double(d.freeBytes))) free")
+                    .font(DesignTokens.numericFont(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(height: 16)
+            .explain("Free space on the boot volume — \(formatBytes(Double(used))) used of \(formatBytes(Double(d.totalBytes))).")
+        }
+    }
+
+    /// htop-style load + uptime footer line. Load is threads, not a
+    /// percentage; near the core count means saturated.
+    @ViewBuilder
+    private var loadLine: some View {
+        if let l = store.snapshot.loadAverage {
+            Text(String(format: "load %.2f %.2f %.2f · up %@",
+                        l.one, l.five, l.fifteen, Self.uptimeShort(l.uptimeSeconds)))
+                .font(DesignTokens.numericFont(size: 10))
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .explain("System load average over 1 / 5 / 15 minutes (runnable threads — ~\(ProcessInfo.processInfo.activeProcessorCount) means fully busy), and time since boot.")
+        }
+    }
+
+    /// Seconds → a compact "3d 4h" / "5h 12m" / "8m" uptime string.
+    private static func uptimeShort(_ seconds: TimeInterval) -> String {
+        let s = Int(seconds)
+        let d = s / 86_400, h = (s % 86_400) / 3_600, m = (s % 3_600) / 60
+        if d > 0 { return "\(d)d \(h)h" }
+        if h > 0 { return "\(h)h \(m)m" }
+        return "\(m)m"
+    }
+
     private var footer: some View {
         HStack(spacing: DesignTokens.Space.s) {
             footerButton("gearshape", help: "Settings") { onShowSettings() }
+            footerButton("doc.on.doc", help: "Copy a text snapshot of all current readings") {
+                copyStatsSnapshot()
+            }
             Spacer()
             selfCostReadout
             Spacer()
             footerButton("power", tint: .red, help: "Quit sys-monitor") { NSApp.terminate(nil) }
         }
+    }
+
+    /// Copy every current reading to the pasteboard as plain text — for
+    /// pasting into a bug report or a note. Uses the formatted (human)
+    /// values, the same ones on screen, at the current throughput unit.
+    private func copyStatsSnapshot() {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(buildStatsText(), forType: .string)
+    }
+
+    private func buildStatsText() -> String {
+        let s = store.snapshot
+        let unit = settings.throughputUnit
+        var lines = ["sys-monitor snapshot"]
+        if case .ok(let c) = s.cpu { lines.append("CPU      \(Int((c.overall * 100).rounded()))%") }
+        if case .ok(let m) = s.memory, m.totalBytes > 0 {
+            let pct = Int((Double(m.usedBytes) / Double(m.totalBytes) * 100).rounded())
+            lines.append("MEM      \(pct)%  (\(formatBytes(Double(m.usedBytes))) / \(formatBytes(Double(m.totalBytes))))")
+        }
+        if case .ok(let n) = s.net {
+            lines.append("NET      ↓\(formatBps(n.inPerSec, unit: unit).trimmingCharacters(in: .whitespaces)) ↑\(formatBps(n.outPerSec, unit: unit).trimmingCharacters(in: .whitespaces))")
+        }
+        if case .ok(let dk) = s.disk {
+            lines.append("DISK     ↓\(formatBps(dk.inPerSec, unit: unit).trimmingCharacters(in: .whitespaces)) ↑\(formatBps(dk.outPerSec, unit: unit).trimmingCharacters(in: .whitespaces))")
+        }
+        if let d = s.diskSpace {
+            lines.append("STORAGE  \(formatBytes(Double(d.freeBytes))) free of \(formatBytes(Double(d.totalBytes)))")
+        }
+        if case .ok(let p) = s.power {
+            lines.append(String(format: "POWER    cpu %.2fW gpu %.2fW ane %.2fW", p.cpuWatts, p.gpuWatts, p.aneWatts))
+        }
+        if let b = s.battery {
+            let state = b.charging ? " charging" : (b.onAC ? " on AC" : "")
+            lines.append("BATTERY  \(b.percent)%\(state)")
+        }
+        if let l = s.loadAverage {
+            lines.append(String(format: "LOAD     %.2f %.2f %.2f  up %@",
+                                l.one, l.five, l.fifteen, Self.uptimeShort(l.uptimeSeconds)))
+        }
+        if case .ok(let procs) = s.processes {
+            let top = procs.sorted { $0.cpu > $1.cpu }.prefix(5)
+            if !top.isEmpty {
+                lines.append("Top processes (CPU):")
+                for p in top {
+                    let name = p.name.count > 22
+                        ? String(p.name.prefix(21)) + "…"
+                        : p.name.padding(toLength: 22, withPad: " ", startingAt: 0)
+                    lines.append("  \(name) \(String(format: "%5.1f%%", p.cpu * 100))  \(formatBytes(Double(p.memBytes)))")
+                }
+            }
+        }
+        return lines.joined(separator: "\n")
     }
 
     /// The monitor's own footprint — how much CPU/memory sys-monitor itself

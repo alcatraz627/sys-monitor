@@ -219,6 +219,22 @@ func runSelfTest() -> Int32 {
               ev4.evaluate(cpuLoad: 1.0, memLoad: 1.0, now: 1).isEmpty)
     }
 
+    print("System facts samplers (7.1 / 7.2)")
+    if let ds = DiskSpaceSampler().read() {
+        check("disk space: total > 0", ds.totalBytes > 0)
+        check("disk space: free <= total", ds.freeBytes <= ds.totalBytes,
+              "free \(ds.freeBytes) total \(ds.totalBytes)")
+    } else {
+        check("disk space sampler returns a value for /", false, "got nil")
+    }
+    if let la = LoadSampler().read() {
+        check("load averages non-negative",
+              la.one >= 0 && la.five >= 0 && la.fifteen >= 0, "got \(la)")
+        check("uptime is positive", la.uptimeSeconds > 0, "got \(la.uptimeSeconds)")
+    } else {
+        check("load sampler returns a value", false, "got nil")
+    }
+
     print(failures == 0 ? "\nALL PASS" : "\n\(failures) FAILURE(S)")
     return failures == 0 ? 0 : 1
 }
