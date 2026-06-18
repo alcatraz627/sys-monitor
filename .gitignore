@@ -18,11 +18,8 @@ xcuserdata/
 .Spotlight-V100
 .Trashes
 
-# Claude Code agent artifacts
-.claude/output/
-.claude/wal.*
-.claude/skills/shared/locks/
-.claude/session-notes/
+# Claude Code agent artifacts (entire dir — internal tooling, not project source)
+.claude/
 _*.claude.md
 **/.playwright-mcp/
 

@@ -1,5 +1,8 @@
 # v2 Plan
 
+> **Historical — all phases shipped.** Kept as the v2 design record. For the
+> app as it stands see `docs/03-implementation.md` + `docs/11-perf-audit.md`.
+
 The roadmap for sys-monitor v2, synthesized from three independent inputs
 produced on 2026-06-12:
 
