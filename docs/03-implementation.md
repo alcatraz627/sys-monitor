@@ -2,6 +2,10 @@
 
 # sys-monitor — Stage 3: Implementation Plan (HOW IT'S BUILT)
 
+> **v1 design record.** The v1 blueprint. Its repo layout + sampler list below
+> are the v1 set; the **current** module map (Power/Battery/Frequency/Alerts/
+> per-interface net + everything v2.1) lives in [`00-overview.md`](00-overview.md).
+
 > **Stage 3 of 3.** The technical blueprint: toolchain, repo layout, module breakdown,
 > the sampling architecture, the two-tier state machine, the AppKit shell + SwiftUI panel
 > wiring, build/run, verification, and a phased build sequence with halt points. Grounded

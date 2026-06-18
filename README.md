@@ -42,6 +42,21 @@ enumeration), no root, no entitlements.
 
 ---
 
+## Screenshots
+
+<!-- Once captured (see assets/CAPTURE.md), replace this comment with:
+<p align="center">
+  <img src="assets/panel.png" width="380" alt="sys-monitor dropdown panel">
+  &nbsp;
+  <img src="assets/menubar.png" width="420" alt="sys-monitor menu-bar glyph">
+</p>
+-->
+
+See it live in a few seconds — `./build.sh --run` (below), or grab a build from
+[Releases](https://github.com/alcatraz627/sys-monitor/releases/latest).
+
+---
+
 ## Install
 
 Three ways in, depending on what you want.
@@ -101,44 +116,15 @@ private-framework readers degrade gracefully if a source isn't present.
 
 ## Features
 
-**Menu bar.** Choose and reorder any of CPU · Memory · Network · Disk ·
-Battery. CPU/MEM render as icon · progress-bar · `%`; NET/DISK as icon · ↓ / ↑
-throughput; Battery as a level glyph · `%`. Fixed identity colors per metric so
-the cells read like wifi/battery icons; load colors (green → orange → red) at
-**adjustable** thresholds; optional compact density; throughput in **bytes/s or
-bits/s**. Right-click for a menu with the current top CPU consumer + Settings +
-Quit. A **global hotkey (⌥⌘M)** toggles the panel from anywhere.
-
-**Panel.** CPU (value + sparkline + per-core strip), memory + swap + pressure,
-system network + disk throughput (with a **per-interface breakdown** when more
-than one interface is active), **storage** (free / total on the boot volume),
-**energy** (per-block power in watts on Apple Silicon + battery state), a
-**process list**, a load-average + uptime footer, and a self-cost readout (the
-monitor's own honest footprint — the budget canary).
-
-**Process list.** Top-N by CPU / memory / disk / network. **Filter** by name,
-pid, or threshold (`>5:cpu`, `<300:mem`, `>1:disk`, `>1:net`). **Pin** a process
-to keep it on top regardless of rank. Expand a row for its path + actions:
-**Terminate / Force-Kill** (two-step; falls back to copying the `sudo`
-command if denied), **Focus** the app, **Copy path**, **Reveal in Finder**.
-EMA-smoothed ranking so the tail doesn't slot-machine; freeze-on-hover pauses
-re-sorting while you read.
-
-**Alerts.** Opt-in notifications when CPU or memory stays above a threshold for
-a sustained window — the one thing that's useful while the panel is closed.
-Debounced + cooldown so it speaks once, not every tick.
-
-**Footer actions.** Settings · copy a text snapshot of all readings · open
-Activity Monitor · quit.
-
-**Settings** (all live, no apply step): sampling cadences, menu-bar cells +
-order, throughput unit, severity thresholds, alerts, process count + default
-sort, sparkline history window (60–300 s), panel display toggles (sparklines,
-per-core strip, coverage row, compact glyph), launch-at-login, reset-to-defaults.
-
-**Lifecycle.** Sleep/wake and display-sleep re-baseline so the first sample
-after a gap never shows a bogus spike; occlusion drops to the idle tier without
-dismissing.
+| Area | What you get |
+|------|--------------|
+| **Menu bar** | Pick & reorder any of CPU · Memory · Network · Disk · Battery. CPU/MEM = icon · bar · `%`; NET/DISK = icon · ↓/↑ throughput; Battery = level · `%`. Fixed identity colors; load colors at **adjustable** thresholds; optional compact density; **bytes/s or bits/s**. |
+| **Panel** | CPU (+ per-core strip + sparkline) · memory + swap + pressure · network & disk throughput (**per-interface split** when >1 active) · **storage** free/total · **energy** (per-block watts on Apple Silicon + battery) · process list · load-avg + uptime · self-cost readout. |
+| **Process list** | Top-N by CPU / memory / disk / network · filter by name, pid, or threshold (`>5:cpu`, `<300:mem`, `>1:disk`) · **pin** to top · expand a row for path + **Terminate / Force-Kill / Focus / Copy path / Reveal** · EMA-smoothed ranking · freeze-on-hover. |
+| **Alerts** | Opt-in notification when CPU/memory stays high for a sustained window — the one signal useful while the panel is closed. Debounced + cooldown. |
+| **Footer** | Settings · copy a text snapshot of all readings · open Activity Monitor · quit. |
+| **Settings** (all live) | Sampling cadences · bar cells + order · throughput unit · severity thresholds · alerts · process count + sort · history window (60–300 s) · display toggles · launch-at-login · reset-to-defaults. |
+| **Global / lifecycle** | **⌥⌘M** toggles the panel from any app · right-click menu shows the top consumer · sleep/wake + display-sleep + occlusion handled so the first sample after a gap never shows a bogus spike. |
 
 ---
 

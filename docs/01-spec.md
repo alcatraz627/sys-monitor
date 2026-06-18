@@ -2,6 +2,10 @@
 
 # sys-monitor — Stage 1: Specification (WHAT)
 
+> **v1 design record.** This is the original v1 spec, kept for the "why." For
+> the app as it stands today (v2.1 features + the current module map), read
+> [`00-overview.md`](00-overview.md).
+
 > **Stage 1 of 3.** Defines *what* sys-monitor is and the requirements it must satisfy —
 > not *how* it behaves moment-to-moment (Stage 2) or *how* it's built (Stage 3).
 > **Status: revised after sub-agent review** (review at

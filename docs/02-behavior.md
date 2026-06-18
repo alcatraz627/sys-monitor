@@ -2,6 +2,9 @@
 
 # sys-monitor — Stage 2: Behavior Plan (HOW IT BEHAVES)
 
+> **v1 design record.** The v1 behavior plan, kept for the "why." For the
+> current app (v2.1 behaviors + module map) read [`00-overview.md`](00-overview.md).
+
 > **Stage 2 of 3.** Defines *how the app behaves moment-to-moment* — the UX of the bar
 > glyph and dropdown panel, every interaction flow, every state, and the sampling state
 > machine that ties behavior to the NFR-1 budget. It does **not** specify code structure /

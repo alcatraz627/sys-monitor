@@ -8,6 +8,14 @@ Apple or the user manually clears the quarantine flag.
 There are two release paths. Pick based on whether you have an Apple Developer
 account.
 
+| | **Path A — ad-hoc** | **Path B — notarized** |
+|---|---|---|
+| Cost | Free | Apple Developer Program, $99/yr |
+| User experience | Clear quarantine once (`xattr` or right-click → Open) | Double-click, just works |
+| Good for | Developers / technical users | Anyone, incl. non-technical |
+| Effort per release | `./release.sh` | `./release.sh` + sign + notarize + staple |
+| Trust shown by macOS | "unidentified developer" until cleared | "Notarized Developer ID" |
+
 ---
 
 ## Path A — free (ad-hoc signed, user clears quarantine once)
