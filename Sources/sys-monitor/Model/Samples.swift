@@ -63,6 +63,13 @@ public struct DiskSpaceSample: Sendable, Equatable {
     public let totalBytes: UInt64
 }
 
+/// One CPU cluster's residency-weighted average frequency, in MHz. Derived
+/// from IOReport performance-state residency × the per-cluster DVFS table.
+public struct ClusterFrequency: Sendable, Equatable {
+    public let name: String   // e.g. "P0", "P1", "S" — the IOReport channel name
+    public let mhz: Double
+}
+
 /// One interface's throughput for the per-interface NET breakdown.
 public struct InterfaceThroughput: Sendable, Equatable {
     public let name: String

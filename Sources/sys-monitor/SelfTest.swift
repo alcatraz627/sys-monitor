@@ -367,6 +367,40 @@ func runSelfTest() -> Int32 {
               !rates.contains { $0.name == "utun0" }, "got \(rates)")
     }
 
+    print("FrequencyMonitor — DVFS tables validated vs powermetrics (10.1)")
+    // Pure helpers first (deterministic).
+    let ambiguous = FrequencyMonitor.uniqueByCount([[1000, 2000, 3000, 4000],
+                                                    [1100, 2100, 3100, 4100]])  // same count, differ
+    check("uniqueByCount drops an ambiguous state count", ambiguous[4] == nil, "got \(ambiguous)")
+    let identical = FrequencyMonitor.uniqueByCount([[1344, 1644, 1992, 2304],
+                                                    [1344, 1644, 1992, 2304]])  // identical dup
+    check("uniqueByCount keeps an identical-duplicate count", identical[4] != nil)
+    check("decodeTable rejects a decreasing/out-of-range blob",
+          FrequencyMonitor.decodeTable(Data([1, 0, 0, 0, 0, 0, 0, 0]) +
+                                       Data(repeating: 0, count: 24)) == nil)
+    // Live parse: the tables must reproduce this machine's powermetrics curves —
+    // P-cluster 15 states 1344…4380, S-cluster 20 states 1308…4608. (Skips
+    // cleanly on a chip where these specific clusters aren't present.)
+    let tables = FrequencyMonitor.cpuFrequencyTables()
+    if let p = tables.first(where: { $0.count == 15 }) {
+        check("P-cluster DVFS table matches powermetrics (1344…4380)",
+              abs(p.first! - 1344) < 1 && abs(p.last! - 4380) < 1, "got \(p.first ?? 0)…\(p.last ?? 0)")
+    } else { print("  (no 15-state table — not this machine's P-cluster layout)") }
+    if let s = tables.first(where: { $0.count == 20 }) {
+        check("S-cluster DVFS table matches powermetrics (1308…4608)",
+              abs(s.first! - 1308) < 1 && abs(s.last! - 4608) < 1, "got \(s.first ?? 0)…\(s.last ?? 0)")
+    } else { print("  (no 20-state table — not this machine's S-cluster layout)") }
+    // Live read: any reported cluster frequency must sit in CPU range.
+    let fm = FrequencyMonitor()
+    if fm.isAvailable {
+        _ = fm.read()                                   // baseline
+        Thread.sleep(forTimeInterval: 0.3)
+        if let freqs = fm.read() {
+            check("live cluster frequencies are in 200…6000 MHz",
+                  freqs.allSatisfy { $0.mhz >= 200 && $0.mhz <= 6000 }, "got \(freqs)")
+        } else { print("  (live read nil — clusters idle in window; not a failure)") }
+    } else { print("  (FrequencyMonitor unavailable here — skipping live read)") }
+
     print(failures == 0 ? "\nALL PASS" : "\n\(failures) FAILURE(S)")
     return failures == 0 ? 0 : 1
 }
