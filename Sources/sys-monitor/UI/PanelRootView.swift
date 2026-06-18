@@ -606,11 +606,30 @@ struct PanelRootView: View {
             footerButton("doc.on.doc", help: "Copy a text snapshot of all current readings") {
                 copyStatsSnapshot()
             }
+            footerButton("waveform.path.ecg", help: "Open Activity Monitor") {
+                openActivityMonitor()
+            }
             Spacer()
             selfCostReadout
             Spacer()
             footerButton("power", tint: .red, help: "Quit sys-monitor") { NSApp.terminate(nil) }
         }
+    }
+
+    /// Launch Activity Monitor, resolved by bundle id with a path fallback.
+    /// Both lookups are non-blocking and `openApplication` is async with an
+    /// error-ignoring completion handler, so a missing/failed launch is a
+    /// silent no-op — never a hang or a crash.
+    private func openActivityMonitor() {
+        let config = NSWorkspace.OpenConfiguration()
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.ActivityMonitor") {
+            NSWorkspace.shared.openApplication(at: url, configuration: config) { _, _ in }
+            return
+        }
+        // Fallback to the known location (Catalina+); skip if absent.
+        let path = "/System/Applications/Utilities/Activity Monitor.app"
+        guard FileManager.default.fileExists(atPath: path) else { return }
+        NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: path), configuration: config) { _, _ in }
     }
 
     /// Copy every current reading to the pasteboard as plain text — for

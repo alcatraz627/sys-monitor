@@ -115,6 +115,12 @@ Mark a row failed → it's a one-line bug report back to me.
       returns to its ranked spot. Kill a pinned process → its row drops silently.
       Pins survive quit+relaunch.
 
+## Footer — v2.1
+- [ ] **Open Activity Monitor (waveform button)** — the ECG-waveform footer button
+      (between copy-snapshot and the self-cost readout) launches Activity Monitor.
+      The panel never hangs or beachballs during/after the click, and if Activity
+      Monitor were missing it would silently do nothing (no crash).
+
 ## Window / lifecycle
 - [ ] **Esc** closes the panel; **right-click** the menu-bar icon → Settings/Quit.
 - [ ] **resize** — drag the panel's bottom edge; height persists across reopen.
