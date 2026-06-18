@@ -231,8 +231,10 @@ func runSelfTest() -> Int32 {
         rs.pinnedPids = [1, 2, 3]
         rs.showSparklines = false
         rs.historyWindowSeconds = 240
+        rs.compactGlyph = true
         rs.resetToDefaults()
         check("reset restores history window", rs.historyWindowSeconds == 60, "got \(rs.historyWindowSeconds)")
+        check("reset restores standard glyph", rs.compactGlyph == false, "got \(rs.compactGlyph)")
         check("reset restores processCount", rs.processCount == 10)
         check("reset restores throughputUnit", rs.throughputUnit == .bytesPerSec)
         check("reset restores thresholds", rs.severityThresholds == .defaults)
@@ -301,6 +303,21 @@ func runSelfTest() -> Int32 {
     } else {
         check("load sampler returns a value", false, "got nil")
     }
+
+    print("GlyphRenderer — compact density (compact-glyph)")
+    do {
+        let snap = MetricsSnapshot.initial()
+        let std = GlyphRenderer(cells: [.cpu, .mem], density: .standard)
+        let cmp = GlyphRenderer(cells: [.cpu, .mem], density: .compact)
+        let stdW = std.render(snapshot: snap).size.width
+        let cmpW = cmp.render(snapshot: snap).size.width
+        check("compact glyph is narrower than standard", cmpW < stdW, "compact \(cmpW) standard \(stdW)")
+        check("compact glyph is shorter than standard",
+              cmp.render(snapshot: snap).size.height < std.render(snapshot: snap).size.height,
+              "compact \(cmp.render(snapshot: snap).size.height)")
+    }
+    let cg = freshStore("selftest.compact") { $0.set(true, forKey: "compactGlyph") }
+    check("compact glyph loads stored value", cg.compactGlyph == true, "got \(cg.compactGlyph)")
 
     print("RingBuffer — adjustable window (9.3)")
     do {

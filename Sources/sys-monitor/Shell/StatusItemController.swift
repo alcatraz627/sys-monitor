@@ -19,6 +19,7 @@ final class StatusItemController {
     private var activityArrows: Bool
     private var throughputUnit: ThroughputUnit
     private var thresholds: SeverityThresholds
+    private var compactGlyph: Bool
     private var renderer: GlyphRenderer
     private var subscription: AnyCancellable?
     private var clickTarget: ClickTarget?
@@ -41,6 +42,7 @@ final class StatusItemController {
         activityArrows: Bool = true,
         throughputUnit: ThroughputUnit = .bytesPerSec,
         thresholds: SeverityThresholds = .defaults,
+        compactGlyph: Bool = false,
         onClick: @escaping () -> Void,
         onShowSettings: @escaping () -> Void
     ) {
@@ -49,8 +51,10 @@ final class StatusItemController {
         self.activityArrows = activityArrows
         self.throughputUnit = throughputUnit
         self.thresholds = thresholds
+        self.compactGlyph = compactGlyph
         self.renderer = GlyphRenderer(cells: cells, activityArrows: activityArrows,
-                                      throughputUnit: throughputUnit, thresholds: thresholds)
+                                      throughputUnit: throughputUnit, thresholds: thresholds,
+                                      density: compactGlyph ? .compact : .standard)
         self.statusItem = NSStatusBar.system.statusItem(
             withLength: NSStatusItem.variableLength
         )
@@ -105,10 +109,15 @@ final class StatusItemController {
         self.thresholds = t
         rebuildRenderer()
     }
+    func updateCompactGlyph(_ on: Bool) {
+        self.compactGlyph = on
+        rebuildRenderer()
+    }
 
     private func rebuildRenderer() {
         renderer = GlyphRenderer(cells: cells, activityArrows: activityArrows,
-                                 throughputUnit: throughputUnit, thresholds: thresholds)
+                                 throughputUnit: throughputUnit, thresholds: thresholds,
+                                 density: compactGlyph ? .compact : .standard)
         lastRenderKey = nil
         redraw(snapshot: store.snapshot)
     }

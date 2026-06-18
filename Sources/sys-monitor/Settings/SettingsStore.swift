@@ -54,6 +54,7 @@ public final class SettingsStore: ObservableObject {
     private static let kMemCrit  = "sevMemCritical"
     private static let kPinnedPids = "pinnedPids"
     private static let kHistoryWindow = "historyWindowSeconds"
+    private static let kCompactGlyph = "compactGlyph"
     private static let kPerCore    = "showPerCoreStrip"
     private static let kSparklines = "showSparklines"
     private static let kCoverage   = "showCoverageRow"
@@ -132,6 +133,12 @@ public final class SettingsStore: ObservableObject {
 
     /// Panel display toggles — each gates an existing render path. All
     /// default on; turning one off declutters the panel.
+    /// Compact menu-bar glyph — every bar dimension shrinks for a smaller
+    /// footprint. Default off (the shipped standard density).
+    @Published public var compactGlyph: Bool {
+        didSet { defaults.set(compactGlyph, forKey: Self.kCompactGlyph) }
+    }
+
     @Published public var showPerCoreStrip: Bool {
         didSet { defaults.set(showPerCoreStrip, forKey: Self.kPerCore) }
     }
@@ -215,6 +222,7 @@ public final class SettingsStore: ObservableObject {
             memCritical: thr(Self.kMemCrit, d.memCritical))
         let storedWindow = (defaults.object(forKey: Self.kHistoryWindow) as? Double) ?? 60
         self.historyWindowSeconds = min(max(storedWindow, 60), 300)
+        self.compactGlyph = (defaults.object(forKey: Self.kCompactGlyph) as? Bool) ?? false
         self.showPerCoreStrip = (defaults.object(forKey: Self.kPerCore) as? Bool) ?? true
         self.showSparklines   = (defaults.object(forKey: Self.kSparklines) as? Bool) ?? true
         self.showCoverageRow  = (defaults.object(forKey: Self.kCoverage) as? Bool) ?? true
@@ -281,6 +289,7 @@ public final class SettingsStore: ObservableObject {
         alertConfig = .defaults
         pinnedPids = []
         historyWindowSeconds = 60
+        compactGlyph = false
         showPerCoreStrip = true
         showSparklines = true
         showCoverageRow = true

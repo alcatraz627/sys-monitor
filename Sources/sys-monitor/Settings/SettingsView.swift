@@ -74,6 +74,8 @@ struct SettingsView: View {
                 Toggle("Activity-brightness arrows (NET / DISK)",
                        isOn: $settings.arrowActivityIndicator)
                     .help("Arrow brightness scales logarithmically with throughput — dim at idle, bright at high transfer. No animation, no extra CPU.")
+                Toggle("Compact glyph", isOn: $settings.compactGlyph)
+                    .help("Shrink the menu-bar glyph — smaller icons, bars, and text for a tighter footprint.")
 
                 Picker("Throughput units", selection: $settings.throughputUnit) {
                     ForEach(ThroughputUnit.allCases, id: \.self) { u in

@@ -47,6 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             activityArrows: settings.arrowActivityIndicator,
             throughputUnit: settings.throughputUnit,
             thresholds: settings.severityThresholds,
+            compactGlyph: settings.compactGlyph,
             onClick: { [weak panelController] in
                 panelController?.toggle()
             },
@@ -135,6 +136,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings.$historyWindowSeconds.dropFirst()
             .sink { [weak coordinator] s in
                 coordinator?.updateHistoryWindow(s)
+            }
+            .store(in: &cancellables)
+
+        settings.$compactGlyph.dropFirst()
+            .sink { [weak statusItemController] on in
+                statusItemController?.updateCompactGlyph(on)
             }
             .store(in: &cancellables)
 

@@ -46,6 +46,10 @@ Mark a row failed → it's a one-line bug report back to me.
       (0/25/50/75/100), shows a bolt while charging, and the color inverts vs the
       other cells: green when charging/plugged or healthy, orange <40%, red <20%.
       On a desktop (no battery) it shows `—`. Reorder it via the cell list (9.4).
+- [ ] **compact glyph (compact-glyph)** — Settings ▸ Menu bar ▸ Compact glyph:
+      toggling it shrinks the whole menu-bar widget (icons, bars, text) to a
+      tighter footprint, live; toggling off restores the standard size. Values
+      stay readable; no clipping. Survives relaunch.
 - [ ] **throughput units (9.1)** — Settings ▸ Menu bar ▸ Throughput units: flip
       Bytes/s ↔ Bits/s. The NET/DISK glyph cells AND the panel's NET/DISK rows +
       per-process disk/net columns all switch together, live. Bits show a

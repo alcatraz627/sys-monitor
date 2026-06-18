@@ -41,6 +41,25 @@ public enum ThroughputUnit: String, Sendable, Hashable, CaseIterable, Codable {
     var letter: String { self == .bitsPerSec ? "b" : "B" }
 }
 
+/// The bar's size/spacing constants, bundled so the glyph can render at a
+/// standard or a compact density. Compact shrinks every dimension for users
+/// who want a smaller menu-bar footprint; standard is the shipped look.
+public struct GlyphDensity: Sendable {
+    let iconPt, barW, barH, valuePt, arrowPt, height: CGFloat
+    let elementGap, groupGap, arrowValGap, leftPad, rightPad: CGFloat
+    let iconWeight: NSFont.Weight
+
+    public static let standard = GlyphDensity(
+        iconPt: 17, barW: 16, barH: 12, valuePt: 11, arrowPt: 11, height: 18,
+        elementGap: 3, groupGap: 10, arrowValGap: 1, leftPad: 14, rightPad: 7,
+        iconWeight: .bold)
+
+    public static let compact = GlyphDensity(
+        iconPt: 13, barW: 12, barH: 9, valuePt: 9, arrowPt: 9, height: 16,
+        elementGap: 2, groupGap: 6, arrowValGap: 1, leftPad: 8, rightPad: 5,
+        iconWeight: .semibold)
+}
+
 /// Renders the cells into a fixed-width `NSImage` for the status-item
 /// button. Grouping follows gestalt by proximity: elements within a cell
 /// are tight; the gap between cells is ~1.5× wider.
@@ -54,24 +73,11 @@ public struct GlyphRenderer {
     public let throughputUnit: ThroughputUnit
     /// Per-metric warn/critical load levels for the CPU / MEM cell colors.
     public let thresholds: SeverityThresholds
+    /// Size/spacing constants — standard or compact.
+    public let density: GlyphDensity
     private let valueFont: NSFont
     private let arrowFont: NSFont
     private let arrowW: CGFloat
-
-    // Single bar density. Fork these into a `Style` enum if a second
-    // density (compact / spacious) is ever offered.
-    private static let iconPt:       CGFloat = 17
-    private static let iconWeight: NSFont.Weight = .bold
-    private static let barW:         CGFloat = 16
-    private static let barH:         CGFloat = 12   // chunky bar
-    private static let valuePt:      CGFloat = 11
-    private static let arrowPt:      CGFloat = 11
-    private static let height:       CGFloat = 18
-    private static let elementGap:   CGFloat = 3
-    private static let groupGap:     CGFloat = 10   // doubled — more air before each icon
-    private static let arrowValGap:  CGFloat = 1    // arrow hugs its value
-    private static let leftPad:      CGFloat = 14   // doubled — same reason
-    private static let rightPad:     CGFloat = 7
 
     /// Constant identity color per cell. The bar still uses load colors
     /// (green / yellow / red); the icon's hue is purely "which cell is
@@ -88,14 +94,16 @@ public struct GlyphRenderer {
 
     public init(cells: [BarCell] = [.cpu, .mem], activityArrows: Bool = true,
                 throughputUnit: ThroughputUnit = .bytesPerSec,
-                thresholds: SeverityThresholds = .defaults) {
+                thresholds: SeverityThresholds = .defaults,
+                density: GlyphDensity = .standard) {
         let effective = cells.isEmpty ? [.cpu] : cells
         self.cells = effective
         self.activityArrows = activityArrows
         self.throughputUnit = throughputUnit
         self.thresholds = thresholds
-        let vFont = NSFont.monospacedDigitSystemFont(ofSize: Self.valuePt, weight: .medium)
-        let aFont = NSFont.systemFont(ofSize: Self.arrowPt, weight: .semibold)
+        self.density = density
+        let vFont = NSFont.monospacedDigitSystemFont(ofSize: density.valuePt, weight: .medium)
+        let aFont = NSFont.systemFont(ofSize: density.arrowPt, weight: .semibold)
         self.valueFont = vFont
         self.arrowFont = aFont
         self.arrowW    = Self.measure("↓", font: aFont)
@@ -159,20 +167,20 @@ public struct GlyphRenderer {
             cellWidths.append(measureCell(cell, snapshot: snapshot))
         }
         let cellsTotal = cellWidths.reduce(0, +)
-        let groupsTotal = CGFloat(max(0, cells.count - 1)) * Self.groupGap
-        let totalWidth = Self.leftPad + cellsTotal + groupsTotal + Self.rightPad
+        let groupsTotal = CGFloat(max(0, cells.count - 1)) * density.groupGap
+        let totalWidth = density.leftPad + cellsTotal + groupsTotal + density.rightPad
 
-        let size = NSSize(width: totalWidth, height: Self.height)
+        let size = NSSize(width: totalWidth, height: density.height)
         let cells = self.cells
         let renderer = self
 
         let image = NSImage(size: size, flipped: false) { _ in
-            var x: CGFloat = Self.leftPad
+            var x: CGFloat = density.leftPad
             for (i, cell) in cells.enumerated() {
-                let cellRect = NSRect(x: x, y: 0, width: cellWidths[i], height: Self.height)
+                let cellRect = NSRect(x: x, y: 0, width: cellWidths[i], height: density.height)
                 renderer.drawCell(cell, in: cellRect, snapshot: snapshot)
                 x += cellWidths[i]
-                if i < cells.count - 1 { x += Self.groupGap }
+                if i < cells.count - 1 { x += density.groupGap }
             }
             return true
         }
@@ -189,12 +197,12 @@ public struct GlyphRenderer {
             let text = Self.cpuPercentText(snapshot)
             let textW = max(Self.measure(text, font: valueFont),
                             Self.measure("00%", font: valueFont))
-            return Self.iconPt + Self.elementGap + Self.barW + Self.elementGap + textW
+            return density.iconPt + density.elementGap + density.barW + density.elementGap + textW
         case .mem:
             let text = Self.memPercentText(snapshot)
             let textW = max(Self.measure(text, font: valueFont),
                             Self.measure("00%", font: valueFont))
-            return Self.iconPt + Self.elementGap + Self.barW + Self.elementGap + textW
+            return density.iconPt + density.elementGap + density.barW + density.elementGap + textW
         case .net:
             return throughputCellWidth(
                 downText: fmt(Self.netDownBps(snapshot)),
@@ -208,7 +216,7 @@ public struct GlyphRenderer {
         case .battery:
             let textW = max(Self.measure(Self.batteryPercentText(snapshot), font: valueFont),
                             Self.measure("100%", font: valueFont))
-            return Self.iconPt + Self.elementGap + textW
+            return density.iconPt + density.elementGap + textW
         }
     }
 
@@ -220,8 +228,8 @@ public struct GlyphRenderer {
         // letters aren't digit-monospaced; the reservation is what fixes
         // the width.)
         let valueW = throughputValueReservedW
-        let halfW = arrowW + Self.arrowValGap + valueW
-        return Self.iconPt + Self.elementGap + halfW + Self.elementGap + halfW
+        let halfW = arrowW + density.arrowValGap + valueW
+        return density.iconPt + density.elementGap + halfW + density.elementGap + halfW
     }
 
     /// 5-char reserved width — wide enough for every value `formatBps`
@@ -290,8 +298,8 @@ public struct GlyphRenderer {
                                iconColor: NSColor, valueColor: NSColor, in rect: NSRect) {
         var x = rect.minX
         drawIcon(symbol, color: iconColor,
-                 in: NSRect(x: x, y: 0, width: Self.iconPt, height: rect.height))
-        x += Self.iconPt + Self.elementGap
+                 in: NSRect(x: x, y: 0, width: density.iconPt, height: rect.height))
+        x += density.iconPt + density.elementGap
         drawText(valueText, font: valueFont, color: valueColor,
                  in: NSRect(x: x, y: 0, width: rect.maxX - x, height: rect.height),
                  align: .left)
@@ -305,15 +313,15 @@ public struct GlyphRenderer {
     ) {
         var x = rect.minX
         drawIcon(symbol, color: identityColor,
-                 in: NSRect(x: x, y: 0, width: Self.iconPt, height: rect.height))
-        x += Self.iconPt + Self.elementGap
+                 in: NSRect(x: x, y: 0, width: density.iconPt, height: rect.height))
+        x += density.iconPt + density.elementGap
 
         let barRect = NSRect(
-            x: x, y: (rect.height - Self.barH) / 2,
-            width: Self.barW, height: Self.barH
+            x: x, y: (rect.height - density.barH) / 2,
+            width: density.barW, height: density.barH
         )
         drawBar(load: load, severity: severity, in: barRect)
-        x += Self.barW + Self.elementGap
+        x += density.barW + density.elementGap
 
         let valueW = rect.maxX - x
         drawText(valueText, font: valueFont, color: .labelColor,
@@ -329,8 +337,8 @@ public struct GlyphRenderer {
     ) {
         var x = rect.minX
         drawIcon(symbol, color: identityColor,
-                 in: NSRect(x: x, y: 0, width: Self.iconPt, height: rect.height))
-        x += Self.iconPt + Self.elementGap
+                 in: NSRect(x: x, y: 0, width: density.iconPt, height: rect.height))
+        x += density.iconPt + density.elementGap
 
         let downText = fmt(downBps)
         let upText   = fmt(upBps)
@@ -342,17 +350,17 @@ public struct GlyphRenderer {
         drawText("↓", font: arrowFont, color: downArrowColor,
                  in: NSRect(x: x, y: 0, width: arrowW, height: rect.height),
                  align: .left)
-        x += arrowW + Self.arrowValGap
+        x += arrowW + density.arrowValGap
         drawText(downText, font: valueFont, color: downValColor,
                  in: NSRect(x: x, y: 0, width: reservedW, height: rect.height),
                  align: .left)
-        x += reservedW + Self.elementGap
+        x += reservedW + density.elementGap
 
         let upValColor: NSColor = (upBps < 1024) ? .secondaryLabelColor : .labelColor
         drawText("↑", font: arrowFont, color: upArrowColor,
                  in: NSRect(x: x, y: 0, width: arrowW, height: rect.height),
                  align: .left)
-        x += arrowW + Self.arrowValGap
+        x += arrowW + density.arrowValGap
         drawText(upText, font: valueFont, color: upValColor,
                  in: NSRect(x: x, y: 0, width: reservedW, height: rect.height),
                  align: .left)
@@ -396,7 +404,7 @@ public struct GlyphRenderer {
 
     private func drawIcon(_ symbol: String, color: NSColor, in rect: NSRect) {
         guard let img = TintedGlyphCache.shared.tinted(
-            symbol: symbol, pointSize: Self.iconPt, weight: Self.iconWeight,
+            symbol: symbol, pointSize: density.iconPt, weight: density.iconWeight,
             color: color
         ) else { return }
         let s = img.size
