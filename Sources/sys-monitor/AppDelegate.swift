@@ -57,6 +57,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         panelController.bind(statusItem: statusItemController.statusItem)
 
+        // Dev badge: a "·dev" label beside the glyph so an isolated dev
+        // instance (build.sh --dev, which passes --dev-autoquit) is never
+        // mistaken for the real widget in the menu bar. The per-tick redraw
+        // only sets the button's image, so the title + position persist.
+        if CommandLine.arguments.contains("--dev-autoquit"),
+           let button = statusItemController.statusItem.button {
+            button.title = "·dev"
+            button.imagePosition = .imageLeft
+        }
+
         // Idle-tier samplers track the bar cells: if NET / DISK is shown
         // there, we need samples to compute its rate while the panel's
         // closed.
