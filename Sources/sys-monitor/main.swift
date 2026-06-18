@@ -57,5 +57,19 @@ MainActor.assumeIsolated {
     let delegate = AppDelegate()
     app.delegate = delegate
     app.setActivationPolicy(.accessory)
+
+    // Dev safety net: `--dev-autoquit <seconds>` makes this instance terminate
+    // itself after the interval. Only the isolated dev bundle (build.sh --dev)
+    // passes it, so a dev build launched for a quick check can never outlive
+    // the work session even if nobody remembers to quit it. The real .app is
+    // never launched with this flag, so production runs forever as normal.
+    if let i = CommandLine.arguments.firstIndex(of: "--dev-autoquit"),
+       i + 1 < CommandLine.arguments.count,
+       let seconds = Double(CommandLine.arguments[i + 1]), seconds > 0 {
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) {
+            NSApp.terminate(nil)
+        }
+    }
+
     app.run()
 }
