@@ -18,10 +18,12 @@ ZIP="sys-monitor-${VER}.zip"
 echo "[release] building v${VER}"
 ./build.sh release
 
-# ditto is Apple's recommended archiver — preserves the bundle's symlinks,
-# resource forks, and signature (plain `zip` can corrupt a .app).
+# ditto is Apple's recommended archiver — preserves the bundle's symlinks and
+# signature (plain `zip` can corrupt a .app). --norsrc --noextattr keeps the
+# archive clean of ._* AppleDouble sidecars (extended-attribute cruft).
 rm -f "${ZIP}"
-ditto -c -k --keepParent "${APP}" "${ZIP}"
+xattr -cr "${APP}"   # drop quarantine/Finder xattrs so no ._* entries leak in
+ditto -c -k --keepParent --norsrc --noextattr "${APP}" "${ZIP}"
 echo "[release] packaged ${ZIP} ($(du -h "${ZIP}" | cut -f1))"
 
 cat <<EOF

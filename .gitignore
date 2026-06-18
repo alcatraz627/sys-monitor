@@ -23,6 +23,9 @@ xcuserdata/
 _*.claude.md
 **/.playwright-mcp/
 
+# Release artifacts (uploaded to GitHub Releases, not tracked)
+sys-monitor-*.zip
+
 # Scratch / personal
 *.local
 .env
