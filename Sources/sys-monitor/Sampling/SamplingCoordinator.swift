@@ -150,6 +150,19 @@ public final class SamplingCoordinator: @unchecked Sendable {
         queue.async { [weak self] in self?.alertEvaluator.config = config }
     }
 
+    /// Set the sparkline history window (seconds) on all four ring buffers.
+    /// Queue-isolated; widening keeps existing points, narrowing trims.
+    public func updateHistoryWindow(_ seconds: TimeInterval) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            let now = monoSeconds()
+            self.cpuHistory.setWindow(seconds, now: now)
+            self.memHistory.setWindow(seconds, now: now)
+            self.netHistory.setWindow(seconds, now: now)
+            self.diskHistory.setWindow(seconds, now: now)
+        }
+    }
+
     /// Install the main-actor sink that posts notifications for fired
     /// alerts. Set once at startup, before sampling produces any tick.
     public func setAlertHandler(_ handler: @escaping @MainActor @Sendable ([AlertEvent]) -> Void) {

@@ -53,6 +53,7 @@ public final class SettingsStore: ObservableObject {
     private static let kMemWarn  = "sevMemWarn"
     private static let kMemCrit  = "sevMemCritical"
     private static let kPinnedPids = "pinnedPids"
+    private static let kHistoryWindow = "historyWindowSeconds"
     private static let kPerCore    = "showPerCoreStrip"
     private static let kSparklines = "showSparklines"
     private static let kCoverage   = "showCoverageRow"
@@ -121,6 +122,12 @@ public final class SettingsStore: ObservableObject {
             defaults.set(severityThresholds.memWarn,     forKey: Self.kMemWarn)
             defaults.set(severityThresholds.memCritical, forKey: Self.kMemCrit)
         }
+    }
+
+    /// How many seconds of history the sparklines retain (60…300). Pushed
+    /// to the coordinator's ring buffers; widening keeps existing points.
+    @Published public var historyWindowSeconds: Double {
+        didSet { defaults.set(historyWindowSeconds, forKey: Self.kHistoryWindow) }
     }
 
     /// Panel display toggles — each gates an existing render path. All
@@ -206,6 +213,8 @@ public final class SettingsStore: ObservableObject {
             cpuCritical: thr(Self.kCpuCrit, d.cpuCritical),
             memWarn:     thr(Self.kMemWarn, d.memWarn),
             memCritical: thr(Self.kMemCrit, d.memCritical))
+        let storedWindow = (defaults.object(forKey: Self.kHistoryWindow) as? Double) ?? 60
+        self.historyWindowSeconds = min(max(storedWindow, 60), 300)
         self.showPerCoreStrip = (defaults.object(forKey: Self.kPerCore) as? Bool) ?? true
         self.showSparklines   = (defaults.object(forKey: Self.kSparklines) as? Bool) ?? true
         self.showCoverageRow  = (defaults.object(forKey: Self.kCoverage) as? Bool) ?? true
@@ -271,6 +280,7 @@ public final class SettingsStore: ObservableObject {
         severityThresholds = .defaults
         alertConfig = .defaults
         pinnedPids = []
+        historyWindowSeconds = 60
         showPerCoreStrip = true
         showSparklines = true
         showCoverageRow = true

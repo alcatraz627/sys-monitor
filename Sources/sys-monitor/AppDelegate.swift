@@ -71,6 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let notifier = alertNotifier
         coordinator.setAlertHandler { events in notifier.post(events) }
         coordinator.updateAlertConfig(settings.alertConfig)
+        coordinator.updateHistoryWindow(settings.historyWindowSeconds)
 
         // Global hotkey (⌥⌘M) toggles the panel from any app — same action
         // as a left-click on the menu-bar icon. No Accessibility permission
@@ -128,6 +129,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings.$alertConfig.dropFirst()
             .sink { [weak coordinator] cfg in
                 coordinator?.updateAlertConfig(cfg)
+            }
+            .store(in: &cancellables)
+
+        settings.$historyWindowSeconds.dropFirst()
+            .sink { [weak coordinator] s in
+                coordinator?.updateHistoryWindow(s)
             }
             .store(in: &cancellables)
 

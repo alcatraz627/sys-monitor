@@ -134,7 +134,7 @@ struct PanelRootView: View {
             HStack(spacing: DesignTokens.Space.s) {
                 Text("CPU").font(DesignTokens.numericFont(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
-                    .explain("Overall CPU load; sparkline shows the last 60 s on a fixed 0–100% scale")
+                    .explain("Overall CPU load; sparkline shows the last \(Int(settings.historyWindowSeconds)) s on a fixed 0–100% scale")
                 Button(action: { panelState.isPinned.toggle() }) {
                     Image(systemName: panelState.isPinned ? "pin.fill" : "pin")
                         .font(.system(size: 11, weight: .medium))
@@ -178,7 +178,7 @@ struct PanelRootView: View {
             HStack(spacing: DesignTokens.Space.s) {
                 Text("MEM").font(DesignTokens.numericFont(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
-                    .explain("Used memory (active + wired + compressed); sparkline shows the last 60 s, auto-scaled to the corner labels")
+                    .explain("Used memory (active + wired + compressed); sparkline shows the last \(Int(settings.historyWindowSeconds)) s, auto-scaled to the corner labels")
                 Spacer()
                 Text(memValueText)
                     .font(DesignTokens.numericFont(size: 12, weight: .medium))
@@ -932,8 +932,8 @@ private struct ThroughputCell: View {
                 .font(DesignTokens.numericFont(size: 10, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .explain(label == "NET"
-                      ? "Network throughput across all interfaces: ↓ received · ↑ sent, per second. Sparkline = last 60 s of total activity, log-scaled."
-                      : "Disk throughput across all drives: ↓ read · ↑ written, per second. Sparkline = last 60 s of total activity, log-scaled.")
+                      ? "Network throughput across all interfaces: ↓ received · ↑ sent, per second. Sparkline = last \(Int(settings.historyWindowSeconds)) s of total activity, log-scaled."
+                      : "Disk throughput across all drives: ↓ read · ↑ written, per second. Sparkline = last \(Int(settings.historyWindowSeconds)) s of total activity, log-scaled.")
             HStack(spacing: DesignTokens.Space.s) {
                 HStack(spacing: 2) {
                     Text("↓")

@@ -17,8 +17,9 @@ public struct HistoryPoint: Sendable, Equatable {
 
 public struct RingBuffer: Sendable, Equatable {
     /// The retention window in seconds. Points older than `now - window` are
-    /// evicted on append.
-    public let windowSeconds: TimeInterval
+    /// evicted on append. Mutable so the user can widen/narrow the history
+    /// window live (see `setWindow`).
+    public private(set) var windowSeconds: TimeInterval
     /// Hard cap on stored points — defensive bound so a runaway producer
     /// can't grow the array unboundedly even if `now` drifts. NFR-4.
     public let maxCapacity: Int
@@ -50,6 +51,14 @@ public struct RingBuffer: Sendable, Equatable {
         if points.count > maxCapacity {
             points.removeFirst(points.count - maxCapacity)
         }
+    }
+
+    /// Change the retention window and immediately re-evict. Widening keeps
+    /// existing points (they just stop being too-old); narrowing drops the
+    /// now-stale head. `now` anchors the cutoff.
+    public mutating func setWindow(_ seconds: TimeInterval, now: TimeInterval) {
+        windowSeconds = seconds
+        evict(now: now)
     }
 
     public var isEmpty: Bool { points.isEmpty }

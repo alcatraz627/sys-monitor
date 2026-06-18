@@ -133,6 +133,17 @@ struct SettingsView: View {
                     .help("The row of one bar per CPU core under the CPU graph.")
                 Toggle("Coverage row", isOn: $settings.showCoverageRow)
                     .help("The dim \"top N of M processes\" line below the list.")
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack {
+                        Text("History window")
+                        Spacer()
+                        Text("\(Int(settings.historyWindowSeconds)) s")
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                    Slider(value: $settings.historyWindowSeconds, in: 60...300, step: 30)
+                }
+                .help("How much history the sparklines keep. Widening fills in over time; narrowing trims immediately.")
             }
 
             Section("Process list") {

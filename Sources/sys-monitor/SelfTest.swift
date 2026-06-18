@@ -230,7 +230,9 @@ func runSelfTest() -> Int32 {
                                      sustainTicks: 2, cooldownSeconds: 10)
         rs.pinnedPids = [1, 2, 3]
         rs.showSparklines = false
+        rs.historyWindowSeconds = 240
         rs.resetToDefaults()
+        check("reset restores history window", rs.historyWindowSeconds == 60, "got \(rs.historyWindowSeconds)")
         check("reset restores processCount", rs.processCount == 10)
         check("reset restores throughputUnit", rs.throughputUnit == .bytesPerSec)
         check("reset restores thresholds", rs.severityThresholds == .defaults)
@@ -299,6 +301,25 @@ func runSelfTest() -> Int32 {
     } else {
         check("load sampler returns a value", false, "got nil")
     }
+
+    print("RingBuffer — adjustable window (9.3)")
+    do {
+        var rb = RingBuffer(windowSeconds: 60)
+        for t in stride(from: 0.0, through: 100.0, by: 10.0) {
+            rb.append(HistoryPoint(timestamp: t, value: 0.5))
+        }
+        // At now=100 with a 60 s window, points ≥40 survive: 40…100 = 7.
+        check("60 s window keeps the last 60 s", rb.count == 7, "got \(rb.count)")
+        rb.setWindow(30, now: 100)   // cutoff 70 → 70,80,90,100
+        check("narrowing trims the stale head", rb.count == 4, "got \(rb.count)")
+        rb.setWindow(200, now: 100)  // can't recover dropped points
+        check("widening keeps current points (no recovery)", rb.count == 4, "got \(rb.count)")
+        // A fresh point now lands within the wider window.
+        rb.append(HistoryPoint(timestamp: 110, value: 0.5))
+        check("wider window retains a new point", rb.count == 5, "got \(rb.count)")
+    }
+    let hw = freshStore("selftest.histwin") { $0.set(Double(180), forKey: "historyWindowSeconds") }
+    check("history window loads stored value", hw.historyWindowSeconds == 180, "got \(hw.historyWindowSeconds)")
 
     print("Network per-interface split (7.3)")
     if let nc = try? NetworkSampler().read() {

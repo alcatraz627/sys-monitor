@@ -56,6 +56,10 @@ Mark a row failed → it's a one-line bug report back to me.
       bars; Coverage row hides the "top N of M" line — each live. Reset to defaults
       restores every preference above (cadences, cells, thresholds, alerts, pins,
       toggles) but leaves launch-at-login, panel size, and pin state alone.
+- [ ] **history window (9.3)** — Settings ▸ Panel display ▸ History window: drag
+      to 300 s. The sparklines fill in to a longer trace over time; the CPU/MEM/
+      NET/DISK hover help updates its "last N s" wording to match. Narrow back to
+      60 s → traces trim immediately. Survives relaunch.
 - [ ] **severity thresholds (9.2)** — Settings ▸ Severity thresholds: drag CPU
       warn down to ~30%. Under light load the CPU value text + glyph CPU bar +
       per-core bars all turn orange/red at the new level, live. Memory has its
