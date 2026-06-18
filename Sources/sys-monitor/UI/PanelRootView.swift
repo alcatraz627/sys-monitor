@@ -691,11 +691,20 @@ struct PanelRootView: View {
     /// promise, so its own cost should be visible, not hidden in Activity
     /// Monitor. Tints when the cost crosses into "something's wrong"
     /// territory (we should sit well under 1%).
+    ///
+    /// Memory here is the physical footprint (what Activity Monitor's "Memory"
+    /// column shows), not RSS — RSS counts shared framework pages and would
+    /// over-report the canary's true cost ~2.5× (e.g. 146 MB RSS vs ~59 MB
+    /// footprint). The process list still shows RSS, which is the only memory
+    /// metric readable for every PID sudoless; our own PID can always read
+    /// footprint, so the one number that's about *our* discipline is honest.
     @ViewBuilder
     private var selfCostReadout: some View {
         if let s = selfSample {
             let pct = s.cpu * 100
-            Text(String(format: "self %.1f%% · %@", pct, formatBytes(Double(s.memBytes))))
+            let mem = currentProcessFootprintBytes()
+            let memBytes = mem > 0 ? Double(mem) : Double(s.memBytes)
+            Text(String(format: "self %.1f%% · %@", pct, formatBytes(memBytes)))
                 .font(DesignTokens.numericFont(size: 10))
                 .foregroundStyle(pct >= 3 ? DesignTokens.loadColor(pct >= 8 ? 1.0 : 0.7)
                                           : Color.secondary.opacity(0.7))
@@ -1571,6 +1580,23 @@ private struct ExpandedRow: View {
         }
     }
 
+}
+
+// MARK: - Process metrics
+
+/// This process's physical memory footprint in bytes — the number Activity
+/// Monitor shows in its "Memory" column (`ri_phys_footprint`), not resident
+/// size. Always readable for our own PID (no privilege needed). Returns 0 if
+/// the syscall fails, so callers can fall back to RSS. Internal so the
+/// self-test can exercise it.
+func currentProcessFootprintBytes() -> UInt64 {
+    var usage = rusage_info_current()
+    let ok = withUnsafeMutablePointer(to: &usage) { ptr -> Bool in
+        ptr.withMemoryRebound(to: (rusage_info_t?).self, capacity: 1) { reb in
+            proc_pid_rusage(getpid(), RUSAGE_INFO_CURRENT, reb) == 0
+        }
+    }
+    return ok ? usage.ri_phys_footprint : 0
 }
 
 // MARK: - Formatting helpers

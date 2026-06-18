@@ -8,9 +8,20 @@ import Darwin
 /// nanoseconds, so the coordinator can delta straight against wall-clock
 /// elapsed seconds.
 ///
-/// `proc_pid_rusage` is NOT used — it overlaps `PROC_PIDTASKINFO` for the
-/// fields we need and would double the syscall count of what's already the
-/// most expensive sampler.
+/// `proc_pid_rusage` IS used (once per PID) for the cumulative disk-I/O bytes
+/// that feed the per-process disk rate — there is no `PROC_PIDTASKINFO` field
+/// for that. It roughly doubles this sampler's syscall count, which is the
+/// main reason process sampling runs ONLY on the open tier and only every
+/// 2nd tick. (An earlier version avoided rusage entirely; the per-process
+/// disk I/O feature reintroduced it. See docs/11-perf-audit.md finding #1 for
+/// a deferral that would skip it for non-displayed PIDs under a CPU sort.)
+///
+/// Per-process memory is `pti_resident_size` (RSS), NOT `phys_footprint`:
+/// rusage (and thus footprint) is privilege-denied for other users' PIDs,
+/// so RSS is the one memory metric available consistently for ALL processes
+/// sudoless. RSS reads higher than Activity Monitor's "Memory" (footprint);
+/// the self-cost readout uses footprint instead since our own PID can always
+/// read it (see PanelRootView.currentProcessFootprintBytes).
 ///
 /// Vanished / privilege-denied PIDs are simply skipped (the `proc_pidinfo`
 /// race between listing and reading is normal on a busy system; skipping

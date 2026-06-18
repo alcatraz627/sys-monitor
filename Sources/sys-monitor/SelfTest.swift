@@ -401,6 +401,12 @@ func runSelfTest() -> Int32 {
         } else { print("  (live read nil — clusters idle in window; not a failure)") }
     } else { print("  (FrequencyMonitor unavailable here — skipping live read)") }
 
+    print("Self memory footprint metric (perf finding #3)")
+    let fp = currentProcessFootprintBytes()
+    print("  self phys_footprint = \(fp / 1_048_576) MB (Activity Monitor 'Memory'; cf. RSS, which is larger)")
+    check("self footprint readable + sane (1 MB … 4 GB)",
+          fp > 1_048_576 && fp < 4_294_967_296, "got \(fp) bytes")
+
     print(failures == 0 ? "\nALL PASS" : "\n\(failures) FAILURE(S)")
     return failures == 0 ? 0 : 1
 }
