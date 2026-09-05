@@ -26,6 +26,9 @@ final class StatusItemController {
     /// Room on the menu bar the glyph is currently drawn on. Recomputed on
     /// screen changes; drives which profile the renderer is built from.
     private var room: MenuBarRoom = .roomy(width: 1440)
+    /// False until the first real classification, so the initial resolution is
+    /// logged even when it matches the placeholder above.
+    private var roomEverResolved = false
     private var renderer: GlyphRenderer
     private var subscription: AnyCancellable?
     private var screenObserver: NSObjectProtocol?
@@ -182,11 +185,22 @@ final class StatusItemController {
     /// displays with identical parameters posts no notification, which is why
     /// this is polled rather than purely event-driven.
     private func refreshRoom() {
-        let next = MenuBarRoom.classify(statusItem.button?.window?.screen ?? NSScreen.main)
-        guard next != room else { return }
+        let screen = MenuBarRoom.screenFor(window: statusItem.button?.window)
+        let next = MenuBarRoom.classify(screen)
+        guard next != room || !roomEverResolved else { return }
         let was = room
         room = next
-        log.info("menu bar room changed \(String(describing: was), privacy: .public) -> \(String(describing: next), privacy: .public)")
+        // notice, not info: info is memory-only, and this is the one decision
+        // that cannot be reproduced from a unit test, so it has to survive
+        // into `log show` on whatever display the user was actually on.
+        log.notice("""
+            menu bar room \(self.roomEverResolved ? "changed" : "resolved", privacy: .public): \
+            \(String(describing: was), privacy: .public) -> \
+            \(String(describing: next), privacy: .public) \
+            on \(screen?.localizedName ?? "no screen", privacy: .public) \
+            (window.screen was \(self.statusItem.button?.window?.screen == nil ? "nil" : "set", privacy: .public))
+            """)
+        roomEverResolved = true
         remakeRenderer()
     }
 

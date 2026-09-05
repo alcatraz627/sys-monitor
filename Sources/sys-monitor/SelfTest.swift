@@ -626,6 +626,21 @@ func runSelfTest() -> Int32 {
         // No screen: the safe default is roomy, because shrinking a glyph
         // nobody asked to shrink is the worse error.
         check("nil screen classifies as roomy", !MenuBarRoom.classify(nil).isNarrow)
+
+        // screenFor falls back when window.screen is nil. Confirmed in the
+        // running app that it is normally set, but a status-item window that
+        // has not been laid out reports nil, so the fallbacks must hold.
+        check("no window at all still yields a screen",
+              MenuBarRoom.screenFor(window: nil) != nil || NSScreen.screens.isEmpty)
+        if let first = NSScreen.screens.first {
+            let w = NSWindow(contentRect: NSRect(x: first.frame.midX, y: first.frame.midY,
+                                                 width: 20, height: 20),
+                             styleMask: [.borderless], backing: .buffered, defer: true)
+            let resolved = MenuBarRoom.screenFor(window: w)
+            check("a window's midpoint picks the screen containing it",
+                  resolved?.localizedName == first.localizedName,
+                  "got \(resolved?.localizedName ?? "nil"), wanted \(first.localizedName)")
+        }
         for s in NSScreen.screens {
             let r = MenuBarRoom.classify(s)
             let notched = s.safeAreaInsets.top > 0

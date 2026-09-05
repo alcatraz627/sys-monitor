@@ -186,6 +186,57 @@ MainActor.assumeIsolated {
         exit(0)
     }
 
+    // Does a REAL status item resolve to a screen, and what does that screen
+    // classify as? The per-display glyph profile hangs entirely on
+    // `statusItem.button?.window?.screen`, and no unit test can exercise it:
+    // the window is created by AppKit when the item is added to the menu bar.
+    // Creates a transient item, reads the accessor, and exits.
+    if CommandLine.arguments.contains("--probe-room") {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        item.button?.title = "?"
+        // AppKit materialises the window asynchronously; poll briefly rather
+        // than sleeping a fixed guess.
+        var window: NSWindow?
+        for _ in 0..<40 {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+            if let w = item.button?.window { window = w; break }
+        }
+        print("status item window: \(window == nil ? "nil" : "present")")
+        if let w = window {
+            print(String(format: "  window.frame    : x %.0f y %.0f w %.0f h %.0f",
+                         w.frame.minX, w.frame.minY, w.frame.width, w.frame.height))
+            print("  window.screen   : \(w.screen?.localizedName ?? "nil")")
+            for s in NSScreen.screens {
+                let contains = s.frame.intersects(w.frame)
+                print(String(format: "    %@ frame x %.0f y %.0f w %.0f h %.0f  contains: %@",
+                             s.localizedName, s.frame.minX, s.frame.minY,
+                             s.frame.width, s.frame.height, contains ? "YES" : "no"))
+            }
+        }
+        if let screen = window?.screen {
+            let room = MenuBarRoom.classify(screen)
+            print("  resolved screen : \(screen.localizedName)")
+            print(String(format: "  safeArea.top    : %.1f", screen.safeAreaInsets.top))
+            print("  classified as   : \(room.isNarrow ? "NARROW" : "roomy")")
+            print(String(format: "  status-item room: %.0f pt", room.statusItemWidth))
+            let profile = room.isNarrow
+                ? (SettingsStore.defaultNarrowBarCells, GlyphDensity.compact)
+                : ([BarCell.cpu, .mem, .net, .disk], GlyphDensity.standard)
+            let r = GlyphRenderer(cells: profile.0, activityArrows: true,
+                                  throughputUnit: .bytesPerSec,
+                                  thresholds: .defaults, density: profile.1)
+            let w = r.totalWidth(snapshot: MetricsSnapshot.initial())
+            print(String(format: "  glyph it picks  : %d cells, %.0f pt (%.0f%% of the strip)",
+                         profile.0.count, w, w / room.statusItemWidth * 100))
+            print(w <= room.statusItemWidth / 3 ? "PASS fits within a third of the strip"
+                                                : "NOTE wider than a third of the strip")
+        } else {
+            print("  window has no screen — cannot classify")
+        }
+        NSStatusBar.system.removeStatusItem(item)
+        exit(0)
+    }
+
     if CommandLine.arguments.contains("--preview-widget") {
         let app = NSApplication.shared
         WidgetPreview.show()

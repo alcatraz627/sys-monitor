@@ -94,6 +94,24 @@ public enum MenuBarRoom: Sendable, Equatable {
         }
         return .roomy(width: screen.frame.width)
     }
+
+    /// Which screen a status item is actually drawn on.
+    ///
+    /// `window.screen` is the obvious accessor and is documented to return
+    /// nil for a window not currently displayed on any screen. A status-item
+    /// window returned nil in a probe, so it is treated as a hint rather than
+    /// the answer: fall back to whichever screen contains the window's
+    /// midpoint, then to the main screen. Getting this wrong is silent, since
+    /// every branch yields a plausible screen and only the wrong glyph shows.
+    public static func screenFor(window: NSWindow?) -> NSScreen? {
+        if let s = window?.screen { return s }
+        if let f = window?.frame, f.width > 0 {
+            let mid = CGPoint(x: f.midX, y: f.midY)
+            if let hit = NSScreen.screens.first(where: { $0.frame.contains(mid) }) { return hit }
+            if let hit = NSScreen.screens.first(where: { $0.frame.intersects(f) }) { return hit }
+        }
+        return NSScreen.main
+    }
 }
 
 /// Renders the cells into a fixed-width `NSImage` for the status-item
