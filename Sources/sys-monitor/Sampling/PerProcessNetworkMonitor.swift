@@ -88,19 +88,32 @@ final class PerProcessNetworkMonitor: @unchecked Sendable {
         }
     }
 
-    /// Stop querying (idle tier). The manager stays alive but goes quiet;
-    /// drop the accumulated flow state so it can't grow while we're not
-    /// even reading it (new-source/removed callbacks keep firing on the
-    /// live manager regardless of the query timer). The next `start()`
-    /// re-baselines from scratch — correct, because the coordinator
-    /// clears `prevProcNet` on every tier transition anyway.
+    /// Stop querying (idle tier). The manager stays alive but goes quiet.
+    ///
+    /// The flow ENTRIES are kept and only their baselines dropped. NStat
+    /// announces a source once, when it is created, so an entry removed here
+    /// is never re-announced: the counts callback for that token finds
+    /// nothing and returns, and the flow stops being counted for as long as
+    /// it stays open. That is what made a torrent running at 7.3 MB/s read
+    /// 0 B for 13 s after one close and reopen — every flow that predated
+    /// the close was invisible from then on.
+    ///
+    /// Clearing the baselines gives the same accounting the old clear was
+    /// after: the next counts callback re-baselines from the current total,
+    /// so bytes moved while nobody was watching are not attributed to the
+    /// reopened session. `liveFlows` cannot grow unbounded meanwhile, since
+    /// the removed-callback still fires and prunes closed flows.
     func stop() {
         queue.async { [weak self] in
             guard let self else { return }
             self.queryTimer?.cancel()
             self.queryTimer = nil
             self.started = false
-            self.liveFlows.removeAll()
+            for (token, var flow) in self.liveFlows {
+                flow.baseline = nil
+                flow.latest = 0
+                self.liveFlows[token] = flow
+            }
             self.retired.removeAll()
         }
     }

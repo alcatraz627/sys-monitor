@@ -87,6 +87,51 @@ MainActor.assumeIsolated {
         exit(0)
     }
 
+    // Per-process network across a panel close/reopen. The defect this
+    // exists to catch is invisible on a first open: flows that predate the
+    // close simply stop being counted, so the column reads 0 for anything
+    // long-lived. Run it with a download or a torrent active.
+    if CommandLine.arguments.contains("--probe-net") {
+        let mon = PerProcessNetworkMonitor()
+        guard mon.isAvailable else { print("per-process network unavailable"); exit(1) }
+        func livePids() -> Set<Int32> {
+            Set((try? ProcessSampler().read())?.map(\.pid) ?? [])
+        }
+        func sample(_ label: String) -> Int {
+            let pids = livePids()
+            let m = mon.cumulativeBytesByPid(livePids: pids)
+            let busy = m.filter { $0.value > 0 }
+            print(String(format: "  %-28s %3d pids with bytes", (label as NSString).utf8String!, busy.count))
+            for (pid, b) in busy.sorted(by: { $0.value > $1.value }).prefix(3) {
+                print(String(format: "      pid %-7d %8llu KB", pid, b / 1024))
+            }
+            return busy.count
+        }
+
+        print("per-process network across a close/reopen")
+        mon.start()
+        Thread.sleep(forTimeInterval: 4.0)
+        let before = sample("open, 4 s of traffic")
+
+        mon.stop()                       // panel closed
+        Thread.sleep(forTimeInterval: 3.0)
+        mon.start()                      // panel reopened
+        Thread.sleep(forTimeInterval: 4.0)
+        let after = sample("reopened, 4 s of traffic")
+
+        print("")
+        if before == 0 {
+            print("INCONCLUSIVE — no traffic during the first window; re-run with a download active")
+            exit(2)
+        }
+        // Flows that predated the close must still be counted. Some churn is
+        // normal, so the bar is that most of them survived.
+        let ok = after >= max(1, before / 2)
+        print(ok ? "PASS pre-existing flows still counted after reopen"
+                 : "FAIL flows that predated the close stopped being counted")
+        exit(ok ? 0 : 1)
+    }
+
     if CommandLine.arguments.contains("--preview-widget") {
         let app = NSApplication.shared
         WidgetPreview.show()
