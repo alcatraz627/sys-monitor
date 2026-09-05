@@ -20,8 +20,15 @@ final class StatusItemController {
     private var throughputUnit: ThroughputUnit
     private var thresholds: SeverityThresholds
     private var compactGlyph: Bool
+    /// The narrow-menu-bar profile: which cells, and whether to use it at all.
+    private var adaptToDisplay: Bool
+    private var narrowCells: [BarCell]
+    /// Room on the menu bar the glyph is currently drawn on. Recomputed on
+    /// screen changes; drives which profile the renderer is built from.
+    private var room: MenuBarRoom = .roomy(width: 1440)
     private var renderer: GlyphRenderer
     private var subscription: AnyCancellable?
+    private var screenObserver: NSObjectProtocol?
     private var clickTarget: ClickTarget?
 
     /// Key of the last frame actually drawn — when the next snapshot
@@ -43,6 +50,8 @@ final class StatusItemController {
         throughputUnit: ThroughputUnit = .bytesPerSec,
         thresholds: SeverityThresholds = .defaults,
         compactGlyph: Bool = false,
+        adaptToDisplay: Bool = true,
+        narrowCells: [BarCell] = SettingsStore.defaultNarrowBarCells,
         onClick: @escaping () -> Void,
         onShowSettings: @escaping () -> Void
     ) {
@@ -52,6 +61,8 @@ final class StatusItemController {
         self.throughputUnit = throughputUnit
         self.thresholds = thresholds
         self.compactGlyph = compactGlyph
+        self.adaptToDisplay = adaptToDisplay
+        self.narrowCells = narrowCells
         self.renderer = GlyphRenderer(cells: cells, activityArrows: activityArrows,
                                       throughputUnit: throughputUnit, thresholds: thresholds,
                                       density: compactGlyph ? .compact : .standard)
@@ -85,6 +96,20 @@ final class StatusItemController {
             self?.redraw(snapshot: snap)
         }
 
+        // Docking, undocking, or a resolution change moves the menu bar the
+        // item lives on. The per-redraw poll would catch it within a tick;
+        // this makes it immediate.
+        screenObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.refreshRoom()
+                self.redraw(snapshot: self.store.snapshot)
+            }
+        }
+
         // Now that all stored properties are set, hand the click target a
         // way to read the current top consumer for its menu header.
         target.topConsumer = { [weak self] in self?.topConsumerText() }
@@ -114,16 +139,57 @@ final class StatusItemController {
         rebuildRenderer()
     }
 
-    private func rebuildRenderer() {
-        renderer = GlyphRenderer(cells: cells, activityArrows: activityArrows,
+    func updateAdaptToDisplay(_ on: Bool) {
+        self.adaptToDisplay = on
+        rebuildRenderer()
+    }
+    func updateNarrowCells(_ cells: [BarCell]) {
+        self.narrowCells = cells
+        rebuildRenderer()
+    }
+
+    /// Which cells and density to draw, given the menu bar we are on. A
+    /// notched laptop gets the narrow profile at compact density; anything
+    /// roomier gets the user's chosen glyph unchanged, because the reason
+    /// for this is the 664 pt strip, not a preference for smaller.
+    private var activeProfile: (cells: [BarCell], density: GlyphDensity) {
+        if adaptToDisplay, room.isNarrow, !narrowCells.isEmpty {
+            return (narrowCells, .compact)
+        }
+        return (cells, compactGlyph ? .compact : .standard)
+    }
+
+    /// Rebuild the renderer from the active profile. Does not draw, so it is
+    /// safe to call from inside `redraw`.
+    private func remakeRenderer() {
+        let profile = activeProfile
+        renderer = GlyphRenderer(cells: profile.cells, activityArrows: activityArrows,
                                  throughputUnit: throughputUnit, thresholds: thresholds,
-                                 density: compactGlyph ? .compact : .standard)
+                                 density: profile.density)
         lastRenderKey = nil
+    }
+
+    private func rebuildRenderer() {
+        remakeRenderer()
         redraw(snapshot: store.snapshot)
+    }
+
+    /// Re-read which display the item sits on and rebuild only if the answer
+    /// changed. Called from `redraw`, so it must never draw: moving between
+    /// displays with identical parameters posts no notification, which is why
+    /// this is polled rather than purely event-driven.
+    private func refreshRoom() {
+        let next = MenuBarRoom.classify(statusItem.button?.window?.screen ?? NSScreen.main)
+        guard next != room else { return }
+        let was = room
+        room = next
+        log.info("menu bar room changed \(String(describing: was), privacy: .public) -> \(String(describing: next), privacy: .public)")
+        remakeRenderer()
     }
 
     private func redraw(snapshot: MetricsSnapshot) {
         guard let button = statusItem.button else { return }
+        refreshRoom()
 
         // Skip drawing while the status window reports itself occluded
         // (hidden by menu-bar overflow on notched Macs, etc.).

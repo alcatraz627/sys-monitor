@@ -54,10 +54,46 @@ public struct GlyphDensity: Sendable {
         elementGap: 3, groupGap: 10, arrowValGap: 1, leftPad: 14, rightPad: 7,
         iconWeight: .bold)
 
+    // leftPad 8 / rightPad 5 sat on top of the padding NSStatusBarButton
+    // already applies, which read as a gap before the first icon rather than
+    // as breathing room. 3/3 leaves the button's own spacing to do the job.
     public static let compact = GlyphDensity(
         iconPt: 13, barW: 12, barH: 9, valuePt: 9, arrowPt: 9, height: 16,
-        elementGap: 2, groupGap: 6, arrowValGap: 1, leftPad: 8, rightPad: 5,
+        elementGap: 2, groupGap: 4, arrowValGap: 1, leftPad: 3, rightPad: 3,
         iconWeight: .semibold)
+}
+
+/// How much room the menu bar this glyph is drawn on actually has.
+///
+/// A notched 14" reports `safeAreaInsets.top > 0` and gives status items the
+/// width of `auxiliaryTopRightArea`, measured at 664 pt against 3440 pt on an
+/// undocked external. That is 5.2x less room for the same glyph, which is why
+/// one configuration cannot be right for both.
+public enum MenuBarRoom: Sendable, Equatable {
+    case roomy(width: CGFloat)
+    case narrow(width: CGFloat)
+
+    public var statusItemWidth: CGFloat {
+        switch self {
+        case .roomy(let w), .narrow(let w): return w
+        }
+    }
+
+    public var isNarrow: Bool {
+        if case .narrow = self { return true }
+        return false
+    }
+
+    /// Classify a screen. `auxiliaryTopRightArea` is the region to the right
+    /// of the notch, which is where status items live; without a notch the
+    /// whole width is shared with the app menus.
+    public static func classify(_ screen: NSScreen?) -> MenuBarRoom {
+        guard let screen else { return .roomy(width: 1440) }
+        if screen.safeAreaInsets.top > 0, let right = screen.auxiliaryTopRightArea {
+            return .narrow(width: right.width)
+        }
+        return .roomy(width: screen.frame.width)
+    }
 }
 
 /// Renders the cells into a fixed-width `NSImage` for the status-item
@@ -186,6 +222,15 @@ public struct GlyphRenderer {
         }
         image.isTemplate = false
         return image
+    }
+
+    /// Total width this glyph would occupy for a snapshot, in points. The
+    /// value the menu bar has to find room for, so a fit claim can be
+    /// asserted rather than eyeballed.
+    public func totalWidth(snapshot: MetricsSnapshot) -> CGFloat {
+        let cellsTotal = cells.reduce(CGFloat(0)) { $0 + measureCell($1, snapshot: snapshot) }
+        let groups = CGFloat(max(0, cells.count - 1)) * density.groupGap
+        return density.leftPad + cellsTotal + groups + density.rightPad
     }
 
     /// Width of a single cell given the snapshot. Compute cells reserve

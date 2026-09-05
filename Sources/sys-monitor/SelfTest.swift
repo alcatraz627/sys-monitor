@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 
 // Boundary-check harness, run via `sys-monitor --self-test` (exits 0 if all
 // pass, 1 otherwise). This is the project's regression suite for the math
@@ -446,6 +447,78 @@ func runSelfTest() -> Int32 {
         f.stamp(now: 500, cadence: 1)
         check("non-advancing clock is a gap, never a negative elapsed",
               f.evaluate(now: 499, cadence: 1, gapMultiplier: gm).isGap)
+    }
+
+    // ---- Glyph fits a notched menu bar (docs/12-parity-baseline.md #9) ----
+    print("Glyph width against a notched laptop's status-item strip")
+    do {
+        // Measured on the 14" built-in: auxiliaryTopRightArea is 664 pt, and
+        // ~15 other menu-bar apps share it. A third of the strip is already
+        // generous for one monitor.
+        let strip: CGFloat = 664
+        let budget = strip / 3
+        let snap = MetricsSnapshot.initial()
+
+        func width(_ cells: [BarCell], _ d: GlyphDensity) -> CGFloat {
+            GlyphRenderer(cells: cells, activityArrows: true,
+                          throughputUnit: .bytesPerSec, thresholds: .defaults,
+                          density: d).totalWidth(snapshot: snap)
+        }
+
+        let narrow = width(SettingsStore.defaultNarrowBarCells, .compact)
+        check("narrow profile fits a third of the strip",
+              narrow <= budget,
+              String(format: "%.0f pt of a %.0f pt budget", narrow, budget))
+        print(String(format: "  narrow profile %.0f pt = %.0f%% of the 664 pt strip",
+                     narrow, narrow / strip * 100))
+
+        // The configuration that prompted this: four cells at standard
+        // density. It must still be MEASURED as too wide, otherwise the
+        // budget above is meaningless and would pass anything.
+        let full = width([.cpu, .mem, .net, .disk], .standard)
+        check("the four-cell standard glyph really is too wide for the strip",
+              full > budget,
+              String(format: "%.0f pt", full))
+        print(String(format: "  four-cell standard %.0f pt = %.0f%% of the strip",
+                     full, full / strip * 100))
+        check("narrow profile is materially narrower than the full one",
+              narrow < full / 2, String(format: "%.0f vs %.0f", narrow, full))
+
+        // Padding must not creep back: it is charged on top of the padding
+        // NSStatusBarButton already applies.
+        check("compact padding stays lean",
+              GlyphDensity.compact.leftPad + GlyphDensity.compact.rightPad <= 8,
+              "got \(GlyphDensity.compact.leftPad + GlyphDensity.compact.rightPad)")
+
+        // Width stability is the property the reserved columns exist for and
+        // the one most at risk from narrowing. Same cells, wildly different
+        // values, identical width.
+        var busy = MetricsSnapshot.initial()
+        busy.net = .ok(Throughput(inPerSec: 943_718_400, outPerSec: 943_718_400))
+        busy.disk = .ok(Throughput(inPerSec: 1, outPerSec: 1))
+        let r = GlyphRenderer(cells: [.cpu, .mem, .net, .disk], activityArrows: true,
+                              throughputUnit: .bytesPerSec, thresholds: .defaults,
+                              density: .compact)
+        check("glyph width does not change with value magnitude",
+              r.totalWidth(snapshot: busy) == r.totalWidth(snapshot: snap),
+              String(format: "%.0f vs %.0f", r.totalWidth(snapshot: busy),
+                     r.totalWidth(snapshot: snap)))
+    }
+
+    print("Menu-bar room classification")
+    do {
+        // No screen: the safe default is roomy, because shrinking a glyph
+        // nobody asked to shrink is the worse error.
+        check("nil screen classifies as roomy", !MenuBarRoom.classify(nil).isNarrow)
+        for s in NSScreen.screens {
+            let r = MenuBarRoom.classify(s)
+            let notched = s.safeAreaInsets.top > 0
+            check("\(s.localizedName) classified by its notch, not its size",
+                  r.isNarrow == notched,
+                  "insets.top \(s.safeAreaInsets.top), narrow \(r.isNarrow)")
+            print(String(format: "  %@: %@ %.0f pt", s.localizedName,
+                         r.isNarrow ? "narrow" : "roomy", r.statusItemWidth))
+        }
     }
 
     print("Self memory footprint metric (perf finding #3)")

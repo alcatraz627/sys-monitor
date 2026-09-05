@@ -132,6 +132,48 @@ MainActor.assumeIsolated {
         exit(ok ? 0 : 1)
     }
 
+    // Render each glyph profile to a PNG so the pixels can be looked at
+    // without restarting the live widget. A width in points is not a render;
+    // spacing and legibility only show up in the image.
+    if let i = CommandLine.arguments.firstIndex(of: "--probe-glyph") {
+        let dir = (i + 1 < CommandLine.arguments.count && !CommandLine.arguments[i + 1].hasPrefix("--"))
+            ? CommandLine.arguments[i + 1] : NSTemporaryDirectory()
+        var snap = MetricsSnapshot.initial()
+        snap.cpu = .ok(CPUSample(overall: 0.26, perCore: []))
+        snap.memory = .ok(MemorySample(usedBytes: 32 << 30, totalBytes: 64 << 30,
+                                       swapUsedBytes: 0, pressure: .normal))
+        snap.net = .ok(Throughput(inPerSec: 1_572_864, outPerSec: 138_240))
+        snap.disk = .ok(Throughput(inPerSec: 361_472, outPerSec: 12_582_912))
+
+        let profiles: [(String, [BarCell], GlyphDensity)] = [
+            ("full-standard", [.cpu, .mem, .net, .disk], .standard),
+            ("full-compact",  [.cpu, .mem, .net, .disk], .compact),
+            ("narrow",        SettingsStore.defaultNarrowBarCells, .compact),
+        ]
+        for (name, cells, density) in profiles {
+            let r = GlyphRenderer(cells: cells, activityArrows: true,
+                                  throughputUnit: .bytesPerSec,
+                                  thresholds: .defaults, density: density)
+            let img = r.render(snapshot: snap)
+            // Draw on the menu bar's own grey; a bare alpha channel reads as
+            // white in a viewer and hides every contrast problem.
+            let out = NSImage(size: img.size)
+            out.lockFocus()
+            NSColor(calibratedWhite: 0.22, alpha: 1).setFill()
+            NSRect(origin: .zero, size: img.size).fill()
+            img.draw(at: .zero, from: .zero, operation: .sourceOver, fraction: 1)
+            out.unlockFocus()
+            guard let tiff = out.tiffRepresentation,
+                  let rep = NSBitmapImageRep(data: tiff),
+                  let png = rep.representation(using: .png, properties: [:]) else { continue }
+            let path = (dir as NSString).appendingPathComponent("glyph-\(name).png")
+            try? png.write(to: URL(fileURLWithPath: path))
+            print(String(format: "%-16s %6.0f pt  %@", (name as NSString).utf8String!,
+                         r.totalWidth(snapshot: snap), path))
+        }
+        exit(0)
+    }
+
     if CommandLine.arguments.contains("--preview-widget") {
         let app = NSApplication.shared
         WidgetPreview.show()

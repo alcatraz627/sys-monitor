@@ -19,6 +19,13 @@ public final class SettingsStore: ObservableObject {
     /// last). Persisted as an array of `BarCell` raw strings.
     public static let defaultBarCells: [BarCell] = [.cpu, .mem]
 
+    /// What the glyph shows on a menu bar with little room. A notched 14"
+    /// gives status items 664 pt in total, and the four-cell standard glyph
+    /// is 411 pt of that, so one app takes 62% of the strip and macOS drops
+    /// somebody with no overflow indicator. These two at compact density are
+    /// 110 pt.
+    public static let defaultNarrowBarCells: [BarCell] = [.cpu, .mem]
+
     public enum ProcSort: String, CaseIterable, Sendable {
         case cpu, mem, disk, net
         public var displayName: String {
@@ -55,6 +62,8 @@ public final class SettingsStore: ObservableObject {
     private static let kPinnedPids = "pinnedPids"
     private static let kHistoryWindow = "historyWindowSeconds"
     private static let kCompactGlyph = "compactGlyph"
+    private static let kAdaptToDisplay = "adaptGlyphToDisplay"
+    private static let kNarrowCells = "narrowBarCells"
     private static let kPerCore    = "showPerCoreStrip"
     private static let kSparklines = "showSparklines"
     private static let kCoverage   = "showCoverageRow"
@@ -133,8 +142,22 @@ public final class SettingsStore: ObservableObject {
 
     /// Panel display toggles — each gates an existing render path. All
     /// default on; turning one off declutters the panel.
+    /// Use the narrow profile when the glyph is on a cramped menu bar. On
+    /// by default: the same glyph that reads well on a 3440 pt external
+    /// display is the one that gets silently dropped on a notched laptop.
+    @Published public var adaptGlyphToDisplay: Bool {
+        didSet { defaults.set(adaptGlyphToDisplay, forKey: Self.kAdaptToDisplay) }
+    }
+
+    /// The cell list used on a cramped menu bar. Rendered at compact
+    /// density regardless of `compactGlyph`, which governs the roomy case.
+    @Published public var narrowBarCells: [BarCell] {
+        didSet { defaults.set(narrowBarCells.map(\.rawValue), forKey: Self.kNarrowCells) }
+    }
+
     /// Compact menu-bar glyph — every bar dimension shrinks for a smaller
-    /// footprint. Default off (the shipped standard density).
+    /// footprint. Default off (the shipped standard density). Governs the
+    /// roomy case only; a cramped menu bar always renders compact.
     @Published public var compactGlyph: Bool {
         didSet { defaults.set(compactGlyph, forKey: Self.kCompactGlyph) }
     }
@@ -223,6 +246,13 @@ public final class SettingsStore: ObservableObject {
         let storedWindow = (defaults.object(forKey: Self.kHistoryWindow) as? Double) ?? 60
         self.historyWindowSeconds = min(max(storedWindow, 60), 300)
         self.compactGlyph = (defaults.object(forKey: Self.kCompactGlyph) as? Bool) ?? false
+        self.adaptGlyphToDisplay = (defaults.object(forKey: Self.kAdaptToDisplay) as? Bool) ?? true
+        if let raw = defaults.object(forKey: Self.kNarrowCells) as? [String] {
+            let decoded = raw.compactMap(BarCell.init(rawValue:))
+            self.narrowBarCells = decoded.isEmpty ? Self.defaultNarrowBarCells : decoded
+        } else {
+            self.narrowBarCells = Self.defaultNarrowBarCells
+        }
         self.showPerCoreStrip = (defaults.object(forKey: Self.kPerCore) as? Bool) ?? true
         self.showSparklines   = (defaults.object(forKey: Self.kSparklines) as? Bool) ?? true
         self.showCoverageRow  = (defaults.object(forKey: Self.kCoverage) as? Bool) ?? true
@@ -290,6 +320,8 @@ public final class SettingsStore: ObservableObject {
         pinnedPids = []
         historyWindowSeconds = 60
         compactGlyph = false
+        adaptGlyphToDisplay = true
+        narrowBarCells = Self.defaultNarrowBarCells
         showPerCoreStrip = true
         showSparklines = true
         showCoverageRow = true

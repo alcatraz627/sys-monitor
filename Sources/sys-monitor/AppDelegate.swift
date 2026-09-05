@@ -48,6 +48,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             throughputUnit: settings.throughputUnit,
             thresholds: settings.severityThresholds,
             compactGlyph: settings.compactGlyph,
+            adaptToDisplay: settings.adaptGlyphToDisplay,
+            narrowCells: settings.narrowBarCells,
             onClick: { [weak panelController] in
                 panelController?.toggle()
             },
@@ -152,6 +154,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings.$compactGlyph.dropFirst()
             .sink { [weak statusItemController] on in
                 statusItemController?.updateCompactGlyph(on)
+            }
+            .store(in: &cancellables)
+
+        settings.$adaptGlyphToDisplay.dropFirst()
+            .sink { [weak statusItemController] on in
+                statusItemController?.updateAdaptToDisplay(on)
+            }
+            .store(in: &cancellables)
+
+        settings.$narrowBarCells.dropFirst()
+            .sink { [weak statusItemController] cells in
+                statusItemController?.updateNarrowCells(cells)
             }
             .store(in: &cancellables)
 
