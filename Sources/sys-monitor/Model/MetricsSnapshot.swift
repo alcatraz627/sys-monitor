@@ -62,6 +62,8 @@ public struct MetricsSnapshot: Sendable, Equatable {
 /// physical footprint, the same quantity Activity Monitor's "Memory" shows.
 public struct ProcSample: Sendable, Equatable {
     public let pid: Int32
+    /// Parent pid, for grouping helpers under the app that spawned them.
+    public var ppid: Int32 = 0
     public let name: String
     public let cpu: Double
     public let memBytes: UInt64
@@ -80,6 +82,7 @@ public struct ProcSample: Sendable, Equatable {
     /// because no guard covered the wiring.
     public init(raw: ProcRaw, cpu: Double, diskBps: Double, netBps: Double) {
         self.pid = raw.pid
+        self.ppid = raw.ppid
         self.name = raw.name
         self.cpu = cpu
         self.memBytes = raw.displayMemoryBytes
@@ -88,9 +91,66 @@ public struct ProcSample: Sendable, Equatable {
     }
 
     /// Direct construction, for fixtures and tests.
-    public init(pid: Int32, name: String, cpu: Double,
+    public init(pid: Int32, ppid: Int32 = 0, name: String, cpu: Double,
                 memBytes: UInt64, diskBps: Double, netBps: Double) {
-        self.pid = pid; self.name = name; self.cpu = cpu
+        self.pid = pid; self.ppid = ppid; self.name = name; self.cpu = cpu
         self.memBytes = memBytes; self.diskBps = diskBps; self.netBps = netBps
+    }
+}
+
+/// A process tree rolled up under the process that owns it.
+///
+/// Almost everything heavy on a Mac is a tree, and a flat top-N misattributes
+/// it badly: Chrome measured 3853 MB across 41 processes while its largest
+/// single row read 245 MB, and a Next.js dev server's workers each read 55 to
+/// 100 MB against roughly 750 MB for the tree. The flat list is still the
+/// right view when hunting one runaway pid, so both are offered.
+public struct ProcGroup: Sendable, Equatable, Identifiable {
+    public let root: ProcSample
+    public let members: [ProcSample]
+
+    public var id: Int32 { root.pid }
+    public var name: String { root.name }
+    public var count: Int { members.count }
+    public var cpu: Double { members.reduce(0) { $0 + $1.cpu } }
+    public var memBytes: UInt64 { members.reduce(0) { $0 &+ $1.memBytes } }
+    public var diskBps: Double { members.reduce(0) { $0 + $1.diskBps } }
+    public var netBps: Double { members.reduce(0) { $0 + $1.netBps } }
+
+    /// Roll samples up to their outermost visible ancestor.
+    ///
+    /// The walk stops below pid 1, so trees root at the app rather than at
+    /// launchd, and it stops at any pid the sampler cannot see, which makes
+    /// a process whose parent is invisible its own root. Cycles and long
+    /// chains are bounded by a hop limit; a pid whose parent chain does not
+    /// terminate is treated as its own root rather than dropped.
+    public static func group(_ samples: [ProcSample]) -> [ProcGroup] {
+        guard !samples.isEmpty else { return [] }
+        var byPid: [Int32: ProcSample] = [:]
+        byPid.reserveCapacity(samples.count)
+        for s in samples { byPid[s.pid] = s }
+
+        func rootPid(of s: ProcSample) -> Int32 {
+            var cur = s
+            var hops = 0
+            while hops < 64 {
+                hops += 1
+                let parent = cur.ppid
+                guard parent > 1, let next = byPid[parent], next.pid != cur.pid else { break }
+                cur = next
+            }
+            return cur.pid
+        }
+
+        var membersByRoot: [Int32: [ProcSample]] = [:]
+        for s in samples { membersByRoot[rootPid(of: s), default: []].append(s) }
+
+        return membersByRoot.compactMap { rootPid, members in
+            guard let root = byPid[rootPid] else { return nil }
+            // Largest child first, so expanding a group shows the reason it
+            // is heavy at the top.
+            return ProcGroup(root: root,
+                             members: members.sorted { $0.memBytes > $1.memBytes })
+        }
     }
 }

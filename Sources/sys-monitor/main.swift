@@ -84,6 +84,18 @@ MainActor.assumeIsolated {
                          p.name as NSString))
         }
         print("  compare to: /usr/bin/footprint -p <pid>")
+
+        let all = (try? ProcessSampler().read())?
+            .map { ProcSample(raw: $0, cpu: 0, diskBps: 0, netBps: 0) } ?? []
+        let groups = ProcGroup.group(all).sorted { $0.memBytes > $1.memBytes }
+        print("\ntop 10 trees — what the grouped list shows")
+        print("  total MB   procs   largest child   name")
+        for g in groups.prefix(10) {
+            print(String(format: "  %8llu %7d %15llu   %@",
+                         g.memBytes / 1048576, g.count,
+                         (g.members.first?.memBytes ?? 0) / 1048576,
+                         g.name as NSString))
+        }
         exit(0)
     }
 

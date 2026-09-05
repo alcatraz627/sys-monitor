@@ -78,6 +78,17 @@ public struct ProcessSampler: Sampler {
             // Name via proc_name — returns the short "comm" name (up to
             // about 16 chars on macOS). Empty-name fallback to "[pid N]"
             // is handled in the UI, not here.
+            // Parent pid for tree roll-up. `proc_taskinfo` carries no ppid,
+            // so this is a second call per pid — the SHORT variant, which is
+            // the cheapest struct that has it. Open-tier only, like the rest
+            // of process enumeration.
+            var shortInfo = proc_bsdshortinfo()
+            let ppid: Int32 = withUnsafeMutablePointer(to: &shortInfo) { ptr -> Int32 in
+                let rc = proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 0,
+                                      ptr, Int32(MemoryLayout<proc_bsdshortinfo>.size))
+                return rc > 0 ? Int32(bitPattern: ptr.pointee.pbsi_ppid) : 0
+            }
+
             var nameBuf = [CChar](repeating: 0, count: 256)
             let nameLen = nameBuf.withUnsafeMutableBufferPointer { buf -> Int32 in
                 proc_name(pid, buf.baseAddress, UInt32(buf.count))
@@ -105,6 +116,7 @@ public struct ProcessSampler: Sampler {
 
             result.append(ProcRaw(
                 pid: pid,
+                ppid: ppid,
                 name: name,
                 cpuTimeNs: cpuTimeNs,
                 residentBytes: info.pti_resident_size,

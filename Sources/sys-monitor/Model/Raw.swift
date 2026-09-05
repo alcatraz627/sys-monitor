@@ -91,6 +91,9 @@ public struct NetIfaceBytes: Sendable {
 /// is instantaneous (`pti_resident_size`).
 public struct ProcRaw: Sendable {
     public let pid: Int32
+    /// Parent pid, for rolling helper processes up under the app that owns
+    /// them. 0 or 1 means "no useful parent" and the process is its own root.
+    public let ppid: Int32
     public let name: String
     public let cpuTimeNs: UInt64
     public let residentBytes: UInt64

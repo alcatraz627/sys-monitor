@@ -62,6 +62,7 @@ public final class SettingsStore: ObservableObject {
     private static let kPinnedPids = "pinnedPids"
     private static let kHistoryWindow = "historyWindowSeconds"
     private static let kCompactGlyph = "compactGlyph"
+    private static let kGroupProcs = "groupProcesses"
     private static let kAdaptToDisplay = "adaptGlyphToDisplay"
     private static let kNarrowCells = "narrowBarCells"
     private static let kPerCore    = "showPerCoreStrip"
@@ -142,6 +143,15 @@ public final class SettingsStore: ObservableObject {
 
     /// Panel display toggles — each gates an existing render path. All
     /// default on; turning one off declutters the panel.
+    /// Show one row per process tree instead of one per process. Chrome is
+    /// 3804 MB across 42 processes whose largest single row reads 489 MB, so
+    /// a flat list understates whatever is actually using the machine.
+    /// Default off: the flat list is the reviewed behaviour and is still the
+    /// right view when hunting one runaway pid.
+    @Published public var groupProcesses: Bool {
+        didSet { defaults.set(groupProcesses, forKey: Self.kGroupProcs) }
+    }
+
     /// Use the narrow profile when the glyph is on a cramped menu bar. On
     /// by default: the same glyph that reads well on a 3440 pt external
     /// display is the one that gets silently dropped on a notched laptop.
@@ -246,6 +256,7 @@ public final class SettingsStore: ObservableObject {
         let storedWindow = (defaults.object(forKey: Self.kHistoryWindow) as? Double) ?? 60
         self.historyWindowSeconds = min(max(storedWindow, 60), 300)
         self.compactGlyph = (defaults.object(forKey: Self.kCompactGlyph) as? Bool) ?? false
+        self.groupProcesses = (defaults.object(forKey: Self.kGroupProcs) as? Bool) ?? false
         self.adaptGlyphToDisplay = (defaults.object(forKey: Self.kAdaptToDisplay) as? Bool) ?? true
         if let raw = defaults.object(forKey: Self.kNarrowCells) as? [String] {
             let decoded = raw.compactMap(BarCell.init(rawValue:))
@@ -320,6 +331,7 @@ public final class SettingsStore: ObservableObject {
         pinnedPids = []
         historyWindowSeconds = 60
         compactGlyph = false
+        groupProcesses = false
         adaptGlyphToDisplay = true
         narrowBarCells = Self.defaultNarrowBarCells
         showPerCoreStrip = true

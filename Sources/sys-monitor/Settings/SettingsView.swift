@@ -76,6 +76,10 @@ struct SettingsView: View {
                     .help("Arrow brightness scales logarithmically with throughput — dim at idle, bright at high transfer. No animation, no extra CPU.")
                 Toggle("Compact glyph", isOn: $settings.compactGlyph)
                     .help("Shrink the menu-bar glyph — smaller icons, bars, and text for a tighter footprint.")
+                Toggle("Adapt to a cramped menu bar", isOn: $settings.adaptGlyphToDisplay)
+                    .help("On a notched laptop the menu bar gives status items about 664 pt in total. Four cells at standard density take 423 pt of that, so macOS silently drops somebody. When this is on, the glyph switches to a narrow profile there and keeps the full one on a roomier display.")
+                Toggle("Group processes by app", isOn: $settings.groupProcesses)
+                    .help("Show one row per process tree instead of one per process, so a browser's helpers count toward the browser. Chrome reads about 3.8 GB across 42 processes whose largest single row is under 500 MB. Turn it off to hunt one runaway pid.")
 
                 Picker("Throughput units", selection: $settings.throughputUnit) {
                     ForEach(ThroughputUnit.allCases, id: \.self) { u in

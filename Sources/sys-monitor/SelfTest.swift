@@ -449,6 +449,74 @@ func runSelfTest() -> Int32 {
               f.evaluate(now: 499, cadence: 1, gapMultiplier: gm).isGap)
     }
 
+    // ---- Process tree roll-up (docs/12-parity-baseline.md #12) ------------
+    print("Process grouping — a tree reads as one consumer")
+    do {
+        func p(_ pid: Int32, _ ppid: Int32, _ name: String, _ mem: UInt64,
+               _ cpu: Double = 0) -> ProcSample {
+            ProcSample(pid: pid, ppid: ppid, name: name, cpu: cpu,
+                       memBytes: mem, diskBps: 0, netBps: 0)
+        }
+        // The shape that motivated this: one browser, three helpers, each
+        // helper smaller than an unrelated process that should not outrank
+        // the tree.
+        let chrome = [p(100, 1, "Google Chrome", 500 << 20, 0.1),
+                      p(101, 100, "Chrome Helper", 240 << 20, 0.2),
+                      p(102, 100, "Chrome Helper", 240 << 20, 0.2),
+                      p(103, 101, "Chrome Renderer", 240 << 20, 0.1)]
+        let other = [p(200, 1, "qbittorrent", 600 << 20, 0.05)]
+        let groups = ProcGroup.group(chrome + other)
+
+        check("one group per tree", groups.count == 2, "got \(groups.count)")
+        if let g = groups.first(where: { $0.name == "Google Chrome" }),
+           let q = groups.first(where: { $0.name == "qbittorrent" }) {
+            check("a grandchild rolls up to the root", g.count == 4, "got \(g.count)")
+            check("group memory is the sum", g.memBytes == UInt64(1220) << 20,
+                  "got \(g.memBytes >> 20) MB")
+            check("group cpu is the sum", abs(g.cpu - 0.6) < 0.0001, "got \(g.cpu)")
+            check("the tree outranks a bigger single process", g.memBytes > q.memBytes,
+                  "\(g.memBytes >> 20) vs \(q.memBytes >> 20) MB")
+            check("largest child first", g.members.first?.pid == 100)
+        } else {
+            check("both expected groups exist", false)
+        }
+
+        // A process whose parent the sampler cannot see is its own root. This
+        // is the common case, not an edge one: 321 of 941 pids are invisible.
+        let orphan = ProcGroup.group([p(300, 999, "node", 100 << 20)])
+        check("invisible parent means the process is its own root",
+              orphan.count == 1 && orphan[0].root.pid == 300)
+
+        // Roots stop below launchd rather than collapsing the machine into
+        // one group.
+        let twoRoots = ProcGroup.group([p(10, 1, "a", 1), p(20, 1, "b", 1)])
+        check("pid 1 is not a root", twoRoots.count == 2, "got \(twoRoots.count)")
+
+        // A parent cycle must terminate rather than hang the open tier.
+        let cycle = ProcGroup.group([p(50, 51, "x", 1), p(51, 50, "y", 1)])
+        check("a ppid cycle terminates and keeps both processes",
+              cycle.reduce(0) { $0 + $1.count } == 2,
+              "got \(cycle.reduce(0) { $0 + $1.count })")
+        check("self-parenting terminates",
+              ProcGroup.group([p(60, 60, "z", 1)]).count == 1)
+        check("empty input yields no groups", ProcGroup.group([]).isEmpty)
+
+        // Live: grouping must not lose or duplicate a process.
+        if let raws = try? ProcessSampler().read(), !raws.isEmpty {
+            let live = raws.map { ProcSample(raw: $0, cpu: 0, diskBps: 0, netBps: 0) }
+            let lg = ProcGroup.group(live)
+            let total = lg.reduce(0) { $0 + $1.count }
+            check("grouping is lossless across the live process table",
+                  total == live.count, "\(total) of \(live.count)")
+            let withParents = live.filter { $0.ppid > 1 }.count
+            check("the live table actually has trees to roll up",
+                  withParents > 0, "\(withParents) processes have a visible parent")
+            if let big = lg.max(by: { $0.memBytes < $1.memBytes }) {
+                print("  largest live tree: \(big.name) \(big.memBytes >> 20) MB across \(big.count)")
+            }
+        }
+    }
+
     // ---- Glyph fits a notched menu bar (docs/12-parity-baseline.md #9) ----
     print("Glyph width against a notched laptop's status-item strip")
     do {
@@ -597,12 +665,12 @@ func runSelfTest() -> Int32 {
     // ---- Per-process memory picks footprint (docs/12-parity-baseline.md #2)
     print("Per-process memory — footprint with an RSS fallback")
     do {
-        let both = ProcRaw(pid: 1, name: "x", cpuTimeNs: 0,
+        let both = ProcRaw(pid: 1, ppid: 0, name: "x", cpuTimeNs: 0,
                            residentBytes: 900, footprintBytes: 300, diskBytes: 0)
         check("footprint wins when readable", both.displayMemoryBytes == 300,
               "got \(both.displayMemoryBytes)")
         check("…and is NOT the resident size", both.displayMemoryBytes != both.residentBytes)
-        let denied = ProcRaw(pid: 2, name: "y", cpuTimeNs: 0,
+        let denied = ProcRaw(pid: 2, ppid: 0, name: "y", cpuTimeNs: 0,
                              residentBytes: 900, footprintBytes: 0, diskBytes: 0)
         check("RSS fallback when rusage was denied", denied.displayMemoryBytes == 900,
               "got \(denied.displayMemoryBytes)")

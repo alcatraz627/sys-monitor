@@ -373,7 +373,7 @@ struct PanelRootView: View {
                     .foregroundStyle(.quaternary)
                     .frame(width: 10)
                 Text(searchText.isEmpty
-                     ? "top \(shown) of \(total) processes"
+                     ? "top \(shown) of \(total) visible"
                      : "\(shown) of \(total) matching")
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -383,7 +383,7 @@ struct PanelRootView: View {
             .overlay(alignment: .top) {
                 Rectangle().fill(Color.secondary.opacity(0.15)).frame(height: 0.5)
             }
-            .explain("The list shows the top processes by the current sort. Kernel and other-user processes are invisible without root, so this is never the whole machine.")
+            .explain("The list shows the top processes by the current sort, out of the ones this app can see. Roughly a third of a typical machine's processes — launchd, WindowServer, other users' daemons — answer no request for their task info, so they never appear here at all. ps and top see them because they ship with an Apple entitlement an ad-hoc-signed app cannot have; it is not a matter of running as root. Activity Monitor will always list more.")
         }
     }
 
@@ -422,6 +422,7 @@ struct PanelRootView: View {
             ProcessList(
                 metric: store.snapshot.processes,
                 ranked: displayedProcesses,
+                treeSize: treeSizeByRootPid,
                 sortBy: sortBy,
                 expandedPids: $expandedPids,
                 triedLookup: $triedLookup,
@@ -533,7 +534,11 @@ struct PanelRootView: View {
         // Empty-frozen guard mirrors the capture-side rule in onHover —
         // an empty order must never mask live data.
         guard let frozen = hoverFrozenPids, !frozen.isEmpty else { return rankedProcesses }
-        guard case .ok(let procs) = store.snapshot.processes else { return [] }
+        guard case .ok(let all) = store.snapshot.processes else { return [] }
+        // Resolve against the same collapsed rows the list is showing. Using
+        // the raw table here would swap a tree's total for its root's own
+        // usage the moment the cursor entered the list.
+        let procs = collapsedIntoTrees(all)
         var byPid: [Int32: ProcSample] = [:]
         byPid.reserveCapacity(procs.count)
         for p in procs { byPid[p.pid] = p }
@@ -804,8 +809,33 @@ struct PanelRootView: View {
     ///   >N / <N, optional :cpu/:mem/:disk/:net — threshold filters
     ///   digits  pid contains those digits
     ///   text    case-insensitive name match (kernel + resolved name)
+    /// One row per process tree, carrying the root's identity and the tree's
+    /// summed usage. Collapsing here, before filtering and sorting, means
+    /// every total is computed over the WHOLE tree rather than over whichever
+    /// members survived a search, and sort, pin and the row cap keep working
+    /// on rows without knowing they stand for more than one process.
+    private func collapsedIntoTrees(_ procs: [ProcSample]) -> [ProcSample] {
+        guard settings.groupProcesses else { return procs }
+        return ProcGroup.group(procs).map { g in
+            ProcSample(pid: g.root.pid, ppid: g.root.ppid,
+                       name: g.name, cpu: g.cpu, memBytes: g.memBytes,
+                       diskBps: g.diskBps, netBps: g.netBps)
+        }
+    }
+
+    /// How many processes each displayed row stands for, keyed by the root
+    /// pid. Absent or 1 means the row is a single process.
+    private var treeSizeByRootPid: [Int32: Int] {
+        guard settings.groupProcesses,
+              case .ok(let procs) = store.snapshot.processes else { return [:] }
+        var out: [Int32: Int] = [:]
+        for g in ProcGroup.group(procs) where g.count > 1 { out[g.root.pid] = g.count }
+        return out
+    }
+
     private var filteredProcesses: [ProcSample] {
-        guard case .ok(let procs) = store.snapshot.processes else { return [] }
+        guard case .ok(let all) = store.snapshot.processes else { return [] }
+        let procs = collapsedIntoTrees(all)
         let raw = searchText.trimmingCharacters(in: .whitespaces)
         if raw.isEmpty { return procs }
         if let threshold = ProcessList.thresholdFilter(raw) {
@@ -1026,6 +1056,9 @@ private struct ProcessList: View {
     @EnvironmentObject var settings: SettingsStore
     let metric: Metric<[ProcSample]>
     let ranked: [ProcSample]
+    /// Processes per row, keyed by root pid, when rows stand for trees.
+    /// Empty in flat mode.
+    var treeSize: [Int32: Int] = [:]
     let sortBy: PanelRootView.ProcSort
     @Binding var expandedPids: Set<Int32>
     @Binding var triedLookup: Set<Int32>
@@ -1128,7 +1161,19 @@ private struct ProcessList: View {
             Text(displayName(for: p))
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            // How many processes this row stands for. Without it a grouped
+            // row is indistinguishable from a single process reporting a
+            // surprising number.
+            if let n = treeSize[p.pid], n > 1 {
+                Text("\(n)")
+                    .font(DesignTokens.numericFont(size: 9))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(Color.primary.opacity(0.10)))
+                    .help("\(n) processes in this tree")
+            }
+            Spacer(minLength: 0)
             // Third column tracks the sort: %CPU normally, or the I/O
             // rate when ranked by disk/network — there's no width for a
             // fourth column at 360 pt, and the value you sorted by is the

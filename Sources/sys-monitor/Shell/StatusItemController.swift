@@ -51,7 +51,10 @@ final class StatusItemController {
         thresholds: SeverityThresholds = .defaults,
         compactGlyph: Bool = false,
         adaptToDisplay: Bool = true,
-        narrowCells: [BarCell] = SettingsStore.defaultNarrowBarCells,
+        // Literal rather than SettingsStore.defaultNarrowBarCells: that is
+        // main-actor isolated, and referencing it in a default argument is an
+        // error under Swift 6. The real value always comes from settings.
+        narrowCells: [BarCell] = [.cpu, .mem],
         onClick: @escaping () -> Void,
         onShowSettings: @escaping () -> Void
     ) {
