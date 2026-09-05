@@ -111,10 +111,24 @@ Process grouping added a third `proc_pidinfo` call per pid
 rusage calls. Measured over 12 full enumerations of ~620 visible pids:
 
 ```
-without ppid call : 1.57 ms
-with ppid call    : 1.66 ms   (+0.08 ms, +5%)
-duty cycle at one enumeration per 2 s: 0.079% -> 0.083% of one core
+machine busy   1.57 -> 1.66 ms   (+0.08 ms, +5%)
+quiet          1.11 -> 1.18 ms   (+0.08 ms, +7%)
+quiet          1.02 -> 1.10 ms   (+0.08 ms, +8%)
+quiet          0.97 -> 1.05 ms   (+0.07 ms, +8%)
+duty cycle at one enumeration per 2 s: about 0.05% -> 0.055% of one core
 ```
+
+**Quote the absolute figure, not the percentage.** The added cost is a stable
++0.07 to +0.08 ms per enumeration across every run. The RATIO is not a property of
+the change: it moves from 5% to 8% purely because a loaded machine inflates the
+baseline it is divided by. An earlier draft of this doc reported "+5%" from a single
+busy-machine run, which understated it.
+
+A concurrent reviewer measured +0.15 to +0.3 ms by comparing medians of separate
+with-and-without runs. That method is exposed to drift between runs; the figures above
+interleave both variants inside one process so drift cancels. The disagreement is
+methodological rather than a dispute about the code, and the interleaved absolute
+number reproduced four times across different machine loads.
 
 Process enumeration runs on the open tier only, so the idle budget that the
 leave-it-running requirement protects is untouched. The memory fixes add no
