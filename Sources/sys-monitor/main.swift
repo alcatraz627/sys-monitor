@@ -46,6 +46,47 @@ MainActor.assumeIsolated {
         exit(0)
     }
 
+    // Memory validation instrument. Prints what the real samplers report so
+    // it can be diffed against `/usr/bin/footprint -p <pid>` and against
+    // Activity Monitor, which is the only way to catch a formula reading the
+    // wrong quantity — every such bug still produces plausible numbers.
+    if CommandLine.arguments.contains("--probe-mem") {
+        if let m = try? MemorySampler().read() {
+            let g = 1073741824.0
+            print("system memory (GiB)")
+            print(String(format: "  used         %6.2f   <- app + wired + compressed",
+                         Double(m.usedBytes) / g))
+            print(String(format: "  app          %6.2f   (internal %.2f - purgeable %.2f)",
+                         Double(m.appBytes) / g, Double(m.internalBytes) / g,
+                         Double(m.purgeableBytes) / g))
+            print(String(format: "  wired        %6.2f", Double(m.wiredBytes) / g))
+            print(String(format: "  compressed   %6.2f", Double(m.compressedBytes) / g))
+            print(String(format: "  cached files %6.2f", Double(m.cachedFilesBytes) / g))
+            print(String(format: "  free         %6.2f   (raw free %.2f - speculative %.2f)",
+                         Double(m.trulyFreeBytes) / g, Double(m.freeBytes) / g,
+                         Double(m.speculativeBytes) / g))
+            print(String(format: "  superseded active-based figure would be %6.2f",
+                         Double(m.activeBytes + m.wiredBytes + m.compressedBytes) / g))
+            print("  compare to: Activity Monitor > Memory")
+        } else {
+            print("MemorySampler unavailable")
+        }
+
+        let top = (try? ProcessSampler().read())?
+            .sorted { $0.displayMemoryBytes > $1.displayMemoryBytes }
+            .prefix(10) ?? []
+        print("\ntop 10 by memory — MB as displayed, with the RSS it replaced")
+        print("  pid      displayed   footprint   RSS      name")
+        for p in top {
+            print(String(format: "  %-8d %9llu %11llu %8llu   %@",
+                         p.pid, p.displayMemoryBytes / 1048576,
+                         p.footprintBytes / 1048576, p.residentBytes / 1048576,
+                         p.name as NSString))
+        }
+        print("  compare to: /usr/bin/footprint -p <pid>")
+        exit(0)
+    }
+
     if CommandLine.arguments.contains("--preview-widget") {
         let app = NSApplication.shared
         WidgetPreview.show()

@@ -16,12 +16,18 @@ import Darwin
 /// disk I/O feature reintroduced it. See docs/11-perf-audit.md finding #1 for
 /// a deferral that would skip it for non-displayed PIDs under a CPU sort.)
 ///
-/// Per-process memory is `pti_resident_size` (RSS), NOT `phys_footprint`:
-/// rusage (and thus footprint) is privilege-denied for other users' PIDs,
-/// so RSS is the one memory metric available consistently for ALL processes
-/// sudoless. RSS reads higher than Activity Monitor's "Memory" (footprint);
-/// the self-cost readout uses footprint instead since our own PID can always
-/// read it (see PanelRootView.currentProcessFootprintBytes).
+/// Per-process memory is `ri_phys_footprint`, which is what Activity
+/// Monitor's "Memory" column shows, with RSS as the fallback when rusage is
+/// denied. An earlier version used RSS throughout on the belief that rusage
+/// was privilege-denied for other users' PIDs; measured on macOS 26.6, every
+/// one of the 620 PIDs that answered `PROC_PIDTASKINFO` also answered
+/// `proc_pid_rusage`, so RSS bought no coverage. See docs/12-parity-baseline.md.
+///
+/// This sampler sees ONLY the user's own processes. 321 of 941 PIDs on a
+/// typical desktop return EPERM from `PROC_PIDTASKINFO`, including launchd
+/// and WindowServer; `ps` and `top` see them because they carry
+/// `com.apple.system-task-ports.read`, which an ad-hoc-signed binary cannot.
+/// The list is therefore partial by construction, and the UI says so.
 ///
 /// Vanished / privilege-denied PIDs are simply skipped (the `proc_pidinfo`
 /// race between listing and reading is normal on a busy system; skipping
@@ -93,12 +99,16 @@ public struct ProcessSampler: Sampler {
             let diskBytes = gotUsage
                 ? usage.ri_diskio_bytesread &+ usage.ri_diskio_byteswritten
                 : 0
+            // Same call, same struct, one more field. Footprint is what
+            // Activity Monitor shows; RSS below is only the fallback.
+            let footprintBytes = gotUsage ? usage.ri_phys_footprint : 0
 
             result.append(ProcRaw(
                 pid: pid,
                 name: name,
                 cpuTimeNs: cpuTimeNs,
                 residentBytes: info.pti_resident_size,
+                footprintBytes: footprintBytes,
                 diskBytes: diskBytes
             ))
         }

@@ -57,9 +57,9 @@ public struct MetricsSnapshot: Sendable, Equatable {
     }
 }
 
-/// One process's render-ready reading: %CPU and disk throughput are
-/// rates over the last process-sampling window; memory is instantaneous
-/// resident size.
+/// One process's render-ready reading: %CPU and disk throughput are rates
+/// over the last process-sampling window; memory is the instantaneous
+/// physical footprint, the same quantity Activity Monitor's "Memory" shows.
 public struct ProcSample: Sendable, Equatable {
     public let pid: Int32
     public let name: String
@@ -72,4 +72,25 @@ public struct ProcSample: Sendable, Equatable {
     /// monitor. 0 when the monitor is unavailable or the pid has no
     /// tracked flows.
     public let netBps: Double
+
+    /// Build from a raw reading. This is the only path the coordinator
+    /// uses, so which memory quantity reaches the UI is decided here rather
+    /// than at the call site. A previous version chose it inline; reverting
+    /// that one expression then re-shipped RSS with the whole suite green,
+    /// because no guard covered the wiring.
+    public init(raw: ProcRaw, cpu: Double, diskBps: Double, netBps: Double) {
+        self.pid = raw.pid
+        self.name = raw.name
+        self.cpu = cpu
+        self.memBytes = raw.displayMemoryBytes
+        self.diskBps = diskBps
+        self.netBps = netBps
+    }
+
+    /// Direct construction, for fixtures and tests.
+    public init(pid: Int32, name: String, cpu: Double,
+                memBytes: UInt64, diskBps: Double, netBps: Double) {
+        self.pid = pid; self.name = name; self.cpu = cpu
+        self.memBytes = memBytes; self.diskBps = diskBps; self.netBps = netBps
+    }
 }

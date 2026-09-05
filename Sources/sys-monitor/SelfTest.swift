@@ -407,6 +407,120 @@ func runSelfTest() -> Int32 {
     check("self footprint readable + sane (1 MB … 4 GB)",
           fp > 1_048_576 && fp < 4_294_967_296, "got \(fp) bytes")
 
+    // ---- System memory formula (docs/12-parity-baseline.md #3) -------------
+    // These fail if usedBytes reverts to active+wired+compressed.
+    print("System memory formula — app memory, not page queues")
+    do {
+        // A machine where active and internal diverge, which is every real
+        // one: half the active queue is file cache, and a third of app memory
+        // has aged onto the inactive queue.
+        let page: UInt64 = 16384
+        let raw = MemoryRaw(
+            activeBytes:      100 * page,
+            wiredBytes:        10 * page,
+            compressedBytes:    5 * page,
+            freeBytes:         20 * page,
+            inactiveBytes:     92 * page,
+            internalBytes:    140 * page,   // app pages, some of them inactive
+            externalBytes:     60 * page,
+            purgeableBytes:    10 * page,
+            speculativeBytes:   8 * page,
+            physicalTotalBytes: 200 * page,
+            swapUsedBytes: 0
+        )
+        check("app memory = internal − purgeable",
+              raw.appBytes == 130 * page, "got \(raw.appBytes / page) pages")
+        check("used = app + wired + compressed (NOT active-based)",
+              raw.usedBytes == 145 * page, "got \(raw.usedBytes / page) pages")
+        check("used differs from the old active-based formula",
+              raw.usedBytes != raw.activeBytes + raw.wiredBytes + raw.compressedBytes,
+              "the two formulas agree, so this fixture cannot detect a revert")
+        check("cached files = external + purgeable",
+              raw.cachedFilesBytes == 70 * page, "got \(raw.cachedFilesBytes / page) pages")
+        check("truly free excludes speculative",
+              raw.trulyFreeBytes == 12 * page, "got \(raw.trulyFreeBytes / page) pages")
+
+        // Underflow guards: purgeable > internal and speculative > free are
+        // not reachable on a healthy kernel, but the subtraction is unsigned.
+        let odd = MemoryRaw(
+            activeBytes: 0, wiredBytes: 0, compressedBytes: 0, freeBytes: 1 * page,
+            inactiveBytes: 0,
+            internalBytes: 1 * page, externalBytes: 0, purgeableBytes: 9 * page,
+            speculativeBytes: 9 * page, physicalTotalBytes: 10 * page, swapUsedBytes: 0)
+        check("purgeable > internal clamps to 0, no unsigned wrap", odd.appBytes == 0)
+        check("speculative > free clamps to 0, no unsigned wrap", odd.trulyFreeBytes == 0)
+    }
+
+    // ---- Live memory identity (docs/12-parity-baseline.md) -----------------
+    // XNU's own invariant. If it stops holding, the field meanings moved and
+    // the formula above is reading the wrong counters.
+    do {
+        let live = try? MemorySampler().read()
+        if let m = live {
+            let lhs = m.activeBytes + m.inactiveBytes + m.speculativeBytes
+            let rhs = m.internalBytes + m.externalBytes
+            // Sampled a moment apart from the kernel's own update, so allow a
+            // small drift rather than demanding equality.
+            let drift = lhs > rhs ? lhs - rhs : rhs - lhs
+            check("active+inactive+speculative ≈ internal+external",
+                  drift < m.physicalTotalBytes / 100,
+                  "drift \(drift / 1_048_576) MB")
+            check("live app memory ≤ live used", m.appBytes <= m.usedBytes)
+            check("live used ≤ physical total", m.usedBytes <= m.physicalTotalBytes,
+                  "used \(m.usedBytes / 1_048_576) MB of \(m.physicalTotalBytes / 1_048_576) MB")
+            print("  live used = \(m.usedBytes / 1_048_576) MB, cached files = \(m.cachedFilesBytes / 1_048_576) MB")
+        } else {
+            print("  (MemorySampler unavailable here — skipping live identity)")
+        }
+    }
+
+    // ---- Per-process memory picks footprint (docs/12-parity-baseline.md #2)
+    print("Per-process memory — footprint with an RSS fallback")
+    do {
+        let both = ProcRaw(pid: 1, name: "x", cpuTimeNs: 0,
+                           residentBytes: 900, footprintBytes: 300, diskBytes: 0)
+        check("footprint wins when readable", both.displayMemoryBytes == 300,
+              "got \(both.displayMemoryBytes)")
+        check("…and is NOT the resident size", both.displayMemoryBytes != both.residentBytes)
+        let denied = ProcRaw(pid: 2, name: "y", cpuTimeNs: 0,
+                             residentBytes: 900, footprintBytes: 0, diskBytes: 0)
+        check("RSS fallback when rusage was denied", denied.displayMemoryBytes == 900,
+              "got \(denied.displayMemoryBytes)")
+
+        // The wiring, not just the helper. Reverting the coordinator's call
+        // site to raw.residentBytes once left the whole suite green while the
+        // UI showed RSS again, so the sample the coordinator actually builds
+        // is asserted here.
+        let wired = ProcSample(raw: both, cpu: 0.5, diskBps: 1, netBps: 2)
+        check("ProcSample(raw:) carries footprint, not RSS",
+              wired.memBytes == 300, "got \(wired.memBytes)")
+        let wiredDenied = ProcSample(raw: denied, cpu: 0, diskBps: 0, netBps: 0)
+        check("ProcSample(raw:) falls back to RSS when denied",
+              wiredDenied.memBytes == 900, "got \(wiredDenied.memBytes)")
+        check("ProcSample(raw:) copies pid/name through",
+              wired.pid == 1 && wired.name == "x")
+
+        // Live: every pid the sampler can see should also yield a footprint,
+        // which is the measured claim the RSS decision was reversed on.
+        if let procs = try? ProcessSampler().read(), !procs.isEmpty {
+            let withFootprint = procs.filter { $0.footprintBytes > 0 }.count
+            check("footprint readable for every visible pid",
+                  withFootprint == procs.count,
+                  "\(withFootprint) of \(procs.count)")
+            let selfPid = ProcessInfo.processInfo.processIdentifier
+            if let me = procs.first(where: { $0.pid == selfPid }) {
+                // Same quantity from two APIs, sampled microseconds apart.
+                let a = me.footprintBytes, b = currentProcessFootprintBytes()
+                let d = a > b ? a - b : b - a
+                check("sampler footprint agrees with the self-cost reader",
+                      d < 8 * 1_048_576, "sampler \(a / 1_048_576) MB vs self \(b / 1_048_576) MB")
+            }
+            print("  \(procs.count) visible pids; \(withFootprint) reported a footprint")
+        } else {
+            print("  (ProcessSampler unavailable here — skipping live footprint)")
+        }
+    }
+
     print(failures == 0 ? "\nALL PASS" : "\n\(failures) FAILURE(S)")
     return failures == 0 ? 0 : 1
 }

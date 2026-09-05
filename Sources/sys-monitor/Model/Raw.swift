@@ -32,6 +32,23 @@ public struct MemoryRaw: Sendable {
     public let wiredBytes: UInt64
     public let compressedBytes: UInt64
     public let freeBytes: UInt64
+    /// Pages the scanner has aged off the active queue. Not displayed; it is
+    /// here so the XNU identity active+inactive+speculative ==
+    /// internal+external can be asserted, which is what proves these counters
+    /// still mean what the formula assumes.
+    public let inactiveBytes: UInt64
+    /// Anonymous (application) pages. This, not `active`, is what "app
+    /// memory" means: the active/inactive split is a page-queue balance the
+    /// scanner maintains, so `active` both includes file cache that happens
+    /// to sit on the active queue and excludes app pages moved to inactive.
+    public let internalBytes: UInt64
+    /// File-backed pages. With `purgeable` this is Activity Monitor's
+    /// "Cached Files".
+    public let externalBytes: UInt64
+    public let purgeableBytes: UInt64
+    /// Pages read ahead but not yet faulted. `vm_stat` subtracts these from
+    /// free; the raw `free_count` includes them.
+    public let speculativeBytes: UInt64
     public let physicalTotalBytes: UInt64
     public let swapUsedBytes: UInt64
 }
@@ -77,7 +94,22 @@ public struct ProcRaw: Sendable {
     public let name: String
     public let cpuTimeNs: UInt64
     public let residentBytes: UInt64
+    /// What Activity Monitor's "Memory" column shows, from
+    /// `ri_phys_footprint`. Zero when rusage was denied for this pid, in
+    /// which case the caller falls back to `residentBytes`. RSS and
+    /// footprint are different quantities, not two scales of one: measured
+    /// across the live process table the ratio runs from 0.09 (a GPU-heavy
+    /// process whose IOSurface pages RSS cannot see) to 19.4, crossing 1.0,
+    /// so nothing can be calibrated from one to the other.
+    public let footprintBytes: UInt64
     public let diskBytes: UInt64
+
+    /// The memory figure to display: footprint when it was readable, else
+    /// RSS. Kept here rather than at the call site so every consumer makes
+    /// the same choice.
+    public var displayMemoryBytes: UInt64 {
+        footprintBytes > 0 ? footprintBytes : residentBytes
+    }
 }
 
 /// Cumulative byte counters from the IOKit `IOBlockStorageDriver` family,

@@ -36,10 +36,15 @@ public struct MemorySampler: Sampler {
         }
         // Page size — `vm_kernel_page_size` is the global; safe to read.
         let pageSize = UInt64(vm_kernel_page_size)
-        let activeBytes     = UInt64(vm.active_count)              * pageSize
-        let wiredBytes      = UInt64(vm.wire_count)                * pageSize
-        let compressedBytes = UInt64(vm.compressor_page_count)     * pageSize
-        let freeBytes       = UInt64(vm.free_count)                * pageSize
+        let activeBytes      = UInt64(vm.active_count)              * pageSize
+        let wiredBytes       = UInt64(vm.wire_count)                * pageSize
+        let compressedBytes  = UInt64(vm.compressor_page_count)     * pageSize
+        let freeBytes        = UInt64(vm.free_count)                * pageSize
+        let inactiveBytes    = UInt64(vm.inactive_count)            * pageSize
+        let internalBytes    = UInt64(vm.internal_page_count)       * pageSize
+        let externalBytes    = UInt64(vm.external_page_count)       * pageSize
+        let purgeableBytes   = UInt64(vm.purgeable_count)           * pageSize
+        let speculativeBytes = UInt64(vm.speculative_count)         * pageSize
 
         // -- swap usage via sysctl ----------------------------------------
         var swap = xsw_usage()
@@ -55,6 +60,11 @@ public struct MemorySampler: Sampler {
             wiredBytes: wiredBytes,
             compressedBytes: compressedBytes,
             freeBytes: freeBytes,
+            inactiveBytes: inactiveBytes,
+            internalBytes: internalBytes,
+            externalBytes: externalBytes,
+            purgeableBytes: purgeableBytes,
+            speculativeBytes: speculativeBytes,
             physicalTotalBytes: physicalTotalBytes,
             swapUsedBytes: swap.xsu_used
         )
@@ -65,10 +75,30 @@ public struct MemorySampler: Sampler {
 // the conversion is metric-specific (which pages count as "used") rather
 // than a generic rate operation.
 public extension MemoryRaw {
-    /// "Used" memory in the Activity-Monitor sense: active + wired +
-    /// compressed. `free` is excluded (idle), and `inactive` is intentionally
-    /// not surfaced (it's cache the kernel will reclaim under pressure).
-    var usedBytes: UInt64 { activeBytes + wiredBytes + compressedBytes }
+    /// App memory: anonymous pages minus the purgeable ones the kernel may
+    /// drop without paging.
+    var appBytes: UInt64 { internalBytes >= purgeableBytes ? internalBytes - purgeableBytes : 0 }
+
+    /// "Used" memory in the Activity-Monitor sense: app + wired + compressed.
+    ///
+    /// It was `active + wired + compressed` until 2026-09-06, which is a
+    /// page-queue size rather than a measure of what is allocated. XNU
+    /// balances the active and inactive queues, so `active` carries file
+    /// cache that happens to be active and omits app pages aged to inactive.
+    /// Measured, a 6 GiB anonymous allocation moved Activity Monitor by
+    /// 5.97 GiB and moved the old formula by 0.08 GiB, because the
+    /// allocation displaced file cache inside queues whose totals held
+    /// steady. Heavy file reads pushed it the other way.
+    var usedBytes: UInt64 { appBytes + wiredBytes + compressedBytes }
+
+    /// Activity Monitor's "Cached Files".
+    var cachedFilesBytes: UInt64 { externalBytes + purgeableBytes }
+
+    /// `vm_stat`'s notion of free, which excludes pages read ahead but not
+    /// yet faulted. The raw `free_count` counts those.
+    var trulyFreeBytes: UInt64 {
+        freeBytes >= speculativeBytes ? freeBytes - speculativeBytes : 0
+    }
 
     // No default for `pressure` — a silent `.normal` fallback is exactly
     // how the panel shipped a hardcoded pressure value in v1. Callers

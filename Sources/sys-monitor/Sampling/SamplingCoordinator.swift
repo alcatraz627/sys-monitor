@@ -716,12 +716,7 @@ public final class SamplingCoordinator: @unchecked Sendable {
                     netBps = Double(netCumulative - prevNet) / elapsed
                 }
                 samples.append(ProcSample(
-                    pid: raw.pid,
-                    name: raw.name,
-                    cpu: cpu,
-                    memBytes: raw.residentBytes,
-                    diskBps: diskBps,
-                    netBps: netBps
+                    raw: raw, cpu: cpu, diskBps: diskBps, netBps: netBps
                 ))
             }
         }
