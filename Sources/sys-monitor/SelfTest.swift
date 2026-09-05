@@ -488,9 +488,20 @@ func runSelfTest() -> Int32 {
               orphan.count == 1 && orphan[0].root.pid == 300)
 
         // Roots stop below launchd rather than collapsing the machine into
-        // one group.
-        let twoRoots = ProcGroup.group([p(10, 1, "a", 1), p(20, 1, "b", 1)])
-        check("pid 1 is not a root", twoRoots.count == 2, "got \(twoRoots.count)")
+        // one group. launchd MUST be in the fixture: without it the walk
+        // stops because byPid[1] is missing, not because pid 1 is excluded,
+        // and the assertion passes while testing nothing. Mutating the bound
+        // from `parent > 1` to `parent > 0` left the old fixture green.
+        let withLaunchd = ProcGroup.group([p(1, 0, "launchd", 1),
+                                           p(10, 1, "a", 2), p(20, 1, "b", 3)])
+        check("launchd is present in the fixture, so the bound is what stops the walk",
+              withLaunchd.contains { $0.root.pid == 1 })
+        check("pid 1 does not absorb its children",
+              withLaunchd.count == 3, "got \(withLaunchd.count) groups")
+        check("a child of launchd is its own root",
+              withLaunchd.first { $0.root.pid == 10 }?.count == 1)
+        check("launchd's own group holds only launchd",
+              withLaunchd.first { $0.root.pid == 1 }?.count == 1)
 
         // A parent cycle must terminate rather than hang the open tier.
         let cycle = ProcGroup.group([p(50, 51, "x", 1), p(51, 50, "y", 1)])
