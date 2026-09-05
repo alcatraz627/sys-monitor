@@ -401,6 +401,53 @@ func runSelfTest() -> Int32 {
         } else { print("  (live read nil — clusters idle in window; not a failure)") }
     } else { print("  (FrequencyMonitor unavailable here — skipping live read)") }
 
+    // ---- Per-metric sample clock (docs/12-parity-baseline.md #6) ----------
+    // The reopen spike: NET/DISK counters go stale while the panel is closed,
+    // but the shared tick clock keeps advancing, so their bytes-since-close
+    // got divided by one tick. Measured 10741 MB/s disk against a true 0.5.
+    print("SampleClock — a metric's rate divides by ITS own interval")
+    do {
+        let gm = 2.0
+        var c = RateMath.SampleClock()
+        check("first read has no baseline", !c.hasBaseline)
+        check("first read is a gap", c.evaluate(now: 100, cadence: 1, gapMultiplier: gm).isGap)
+
+        c.stamp(now: 100, cadence: 1)
+        check("baseline recorded", c.hasBaseline)
+        let steady = c.evaluate(now: 101, cadence: 1, gapMultiplier: gm)
+        check("steady 1 s tick is not a gap", !steady.isGap)
+        check("…and reports its own elapsed", abs(steady.elapsed - 1.0) < 0.001,
+              "got \(steady.elapsed)")
+
+        // The reopen case. The panel closed at t=100 and reopened at t=400.
+        // Five minutes of bytes must never be divided by one tick.
+        let reopen = c.evaluate(now: 400, cadence: 1, gapMultiplier: gm)
+        check("300 s since this metric was last read IS a gap", reopen.isGap,
+              "elapsed \(reopen.elapsed)")
+        check("…and elapsed is the real 300 s, not one tick",
+              abs(reopen.elapsed - 300.0) < 0.001, "got \(reopen.elapsed)")
+
+        // A cadence change must not misread a healthy old-cadence interval
+        // as a gap — the FB-2/FB-4 case, now per metric.
+        var d = RateMath.SampleClock()
+        d.stamp(now: 0, cadence: 5)
+        check("5 s interval judged against the cadence it accrued under",
+              !d.evaluate(now: 5, cadence: 1, gapMultiplier: gm).isGap)
+
+        var e = RateMath.SampleClock()
+        e.stamp(now: 0, cadence: 1)
+        e.reset()
+        check("reset drops the baseline", !e.hasBaseline)
+        check("…so the next read only re-baselines",
+              e.evaluate(now: 1, cadence: 1, gapMultiplier: gm).isGap)
+
+        // Time going backwards (clock step) must not produce a rate.
+        var f = RateMath.SampleClock()
+        f.stamp(now: 500, cadence: 1)
+        check("non-advancing clock is a gap, never a negative elapsed",
+              f.evaluate(now: 499, cadence: 1, gapMultiplier: gm).isGap)
+    }
+
     print("Self memory footprint metric (perf finding #3)")
     let fp = currentProcessFootprintBytes()
     print("  self phys_footprint = \(fp / 1_048_576) MB (Activity Monitor 'Memory'; cf. RSS, which is larger)")

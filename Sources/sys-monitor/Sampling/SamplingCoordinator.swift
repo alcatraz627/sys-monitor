@@ -90,6 +90,17 @@ public final class SamplingCoordinator: @unchecked Sendable {
     /// FB-2 / FB-4).
     private var prevTickCadence: Double = 0
 
+    /// NET and DISK keep their own last-read clocks, because they are not
+    /// read on every tick: the idle tier samples them only when a bar cell
+    /// asks for them. `prevTickTime` advances on every tick regardless, so
+    /// deriving their elapsed from it divided a whole panel-closed period of
+    /// bytes by one tick's worth of time — a 10 GB/s disk row on reopen, and
+    /// a 1.00 spike parked in the sparkline for the rest of the window. The
+    /// shared gap test could not see it, because the interval it judged was
+    /// healthy; the stale thing was the counter, not the clock.
+    private var netClock = RateMath.SampleClock()
+    private var diskClock = RateMath.SampleClock()
+
     // Process enumeration runs every 2nd open tick (it's the open tier's
     // dominant cost, and a 2 s %CPU window is less noisy than 1 s anyway).
     // Its rate math therefore needs its own elapsed clock — deltaing a
@@ -367,10 +378,11 @@ public final class SamplingCoordinator: @unchecked Sendable {
         lastProcSampleTime = 0
         lastProcMetric = .measuring
         // Per-core/process are open-tier only and need fresh baselines.
-        // NET/DISK prevs survive — if idle tier was sampling them, they
-        // are fresh and the next open tick can emit a rate immediately.
-        // If idle wasn't sampling them, the gap-based re-baseline
-        // triggers automatically.
+        // NET/DISK prevs survive deliberately: when the idle tier was
+        // sampling them they are fresh, and the first open tick can emit a
+        // rate immediately. When it was not, their own clocks make the
+        // interval read as a gap and they re-baseline. That used to be
+        // asserted rather than true, which is the reopen spike.
         prevPerCore = nil
         prevProcCpu.removeAll(keepingCapacity: true)
         prevProcDisk.removeAll(keepingCapacity: true)
@@ -438,6 +450,8 @@ public final class SamplingCoordinator: @unchecked Sendable {
         prevTickTime = 0
         prevTickCadence = 0
         lastProcSampleTime = 0
+        netClock.reset()
+        diskClock.reset()
         lastProcMetric = .measuring
     }
 
@@ -463,10 +477,10 @@ public final class SamplingCoordinator: @unchecked Sendable {
         let cpuMetric  = readOverallCPU(now: now, isGap: isGap)
         let memMetric  = readMemory(now: now)
         let netMetric: Metric<Throughput> = idleSamplesNet
-            ? readNet(now: now, elapsed: elapsed, isGap: isGap)
+            ? readNet(now: now, cadence: idleCadenceSeconds)
             : .measuring
         let diskMetric: Metric<Throughput> = idleSamplesDisk
-            ? readDisk(now: now, elapsed: elapsed, isGap: isGap)
+            ? readDisk(now: now, cadence: idleCadenceSeconds)
             : .measuring
 
         prevTickTime = now
@@ -493,8 +507,8 @@ public final class SamplingCoordinator: @unchecked Sendable {
         refreshPressureLevel()
         let cpuMetric  = readFullCPU(now: now, isGap: isGap)
         let memMetric  = readMemory(now: now)
-        let netMetric  = readNet(now: now, elapsed: elapsed, isGap: isGap)
-        let diskMetric = readDisk(now: now, elapsed: elapsed, isGap: isGap)
+        let netMetric  = readNet(now: now, cadence: openCadenceSeconds)
+        let diskMetric = readDisk(now: now, cadence: openCadenceSeconds)
 
         // Process enumeration every 2nd tick — see the divisor comment on
         // `openTickIndex`. Ticks 1 and 2 both sample so the early tick
@@ -579,19 +593,21 @@ public final class SamplingCoordinator: @unchecked Sendable {
         }
     }
 
-    private func readNet(
-        now: TimeInterval, elapsed: TimeInterval, isGap: Bool
-    ) -> Metric<Throughput> {
+    private func readNet(now: TimeInterval, cadence: Double) -> Metric<Throughput> {
+        let (elapsed, isGap) = netClock.evaluate(
+            now: now, cadence: cadence, gapMultiplier: gapMultiplier)
+
         let counters: NetCounters
-        // A failed read must also drop the baseline: prevTickTime advances
-        // every tick, so a prev that survives an outage would delta N ticks
-        // of bytes over one tick's elapsed — an N× rate spike on recovery.
+        // A failed read must also drop the baseline: a prev that survives an
+        // outage would delta N ticks of bytes over one tick's elapsed — an
+        // N× rate spike on recovery.
         do { counters = try netSampler.read() } catch {
             prevNet = nil
+            netClock.reset()
             lastPerInterfaceNet = []
             return .unavailable
         }
-        defer { prevNet = counters }
+        defer { prevNet = counters; netClock.stamp(now: now, cadence: cadence) }
         lastPerInterfaceNet = []   // cleared unless this tick produces a rate
 
         guard let prev = prevNet, !isGap else { return .measuring }
@@ -632,16 +648,18 @@ public final class SamplingCoordinator: @unchecked Sendable {
         return max(0, min(1, log10(bps) / maxLog))
     }
 
-    private func readDisk(
-        now: TimeInterval, elapsed: TimeInterval, isGap: Bool
-    ) -> Metric<Throughput> {
+    private func readDisk(now: TimeInterval, cadence: Double) -> Metric<Throughput> {
+        let (elapsed, isGap) = diskClock.evaluate(
+            now: now, cadence: cadence, gapMultiplier: gapMultiplier)
+
         let counters: DiskCounters
         // Same baseline-drop rule as readNet — see the comment there.
         do { counters = try diskSampler.read() } catch {
             prevDisk = nil
+            diskClock.reset()
             return .unavailable
         }
-        defer { prevDisk = counters }
+        defer { prevDisk = counters; diskClock.stamp(now: now, cadence: cadence) }
 
         guard let prev = prevDisk, !isGap else { return .measuring }
         guard

@@ -53,6 +53,58 @@ public enum RateMath {
     }
 
     /// Whether the interval since the last tick is too long to delta across —
+    /// see `isGap` below. `SampleClock` is the per-metric wrapper.
+
+    /// Tracks when ONE metric was last read, so its rate divides by the time
+    /// since that metric's own last reading rather than since the last tick
+    /// of any kind.
+    ///
+    /// The distinction is not academic. NET and DISK are read every tick in
+    /// the open tier but only on request in the idle tier, so a shared tick
+    /// clock told them that 0.3 s had passed when their counters were minutes
+    /// old, and the whole panel-closed period of bytes was divided by one
+    /// tick. The gap test could not see it: the interval it judged was
+    /// healthy, and the stale thing was the counter. Owning the clock makes
+    /// that mistake unrepresentable rather than merely fixed.
+    public struct SampleClock: Sendable, Equatable {
+        /// Optional rather than a 0 sentinel: `monoSeconds()` is free to
+        /// return 0, and a sentinel would read that legitimate stamp as
+        /// "never sampled" and silently re-baseline forever.
+        private var last: (time: TimeInterval, cadence: Double)?
+
+        public init() {}
+
+        /// Elapsed since this metric was last read, and whether that gap is
+        /// too wide to delta across. A first read reports elapsed 0 and
+        /// `isGap == true`, which callers treat as "baseline only".
+        public func evaluate(now: TimeInterval, cadence: Double,
+                             gapMultiplier: Double) -> (elapsed: TimeInterval, isGap: Bool) {
+            guard let last else { return (0, true) }
+            let elapsed = now - last.time
+            guard elapsed > 0 else { return (elapsed, true) }
+            let gap = RateMath.isGap(
+                elapsed: elapsed, cadence: cadence,
+                prevCadence: last.cadence > 0 ? last.cadence : cadence,
+                gapMultiplier: gapMultiplier)
+            return (elapsed, gap)
+        }
+
+        public mutating func stamp(now: TimeInterval, cadence: Double) {
+            last = (now, cadence)
+        }
+
+        /// Forget the last reading, so the next one only re-baselines. Used
+        /// when the counter behind it is dropped (read failure, wake).
+        public mutating func reset() { last = nil }
+
+        public var hasBaseline: Bool { last != nil }
+
+        public static func == (a: SampleClock, b: SampleClock) -> Bool {
+            a.last?.time == b.last?.time && a.last?.cadence == b.last?.cadence
+        }
+    }
+
+    /// Whether the interval since the last tick is too long to delta across —
     /// a "gap" that forces a re-baseline. The threshold is judged against the
     /// LARGER of the current cadence and the cadence the previous tick was
     /// stamped under, so the first tick after a tier switch or cadence change
