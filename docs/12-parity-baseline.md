@@ -104,6 +104,24 @@ Built-in Retina     1512 x  982, safeAreaInsets.top 32.0, notch 185 pt
                     auxiliaryTopLeftArea 663 pt · auxiliaryTopRightArea 664 pt
 ```
 
+## Cost of the changes, measured
+
+Process grouping added a third `proc_pidinfo` call per pid
+(`PROC_PIDT_SHORTBSDINFO`, for `ppid`) alongside the existing taskinfo and
+rusage calls. Measured over 12 full enumerations of ~620 visible pids:
+
+```
+without ppid call : 1.57 ms
+with ppid call    : 1.66 ms   (+0.08 ms, +5%)
+duty cycle at one enumeration per 2 s: 0.079% -> 0.083% of one core
+```
+
+Process enumeration runs on the open tier only, so the idle budget that the
+leave-it-running requirement protects is untouched. The memory fixes add no
+syscalls at all: `ri_phys_footprint` rides the `proc_pid_rusage` call the
+sampler already made, and the system formula reads four more fields from the
+`vm_statistics64` struct already fetched.
+
 ## Deliberate non-goals
 
 Recorded so the gate does not flag them as omissions.

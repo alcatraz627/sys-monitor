@@ -285,8 +285,13 @@ public final class SamplingCoordinator: @unchecked Sendable {
             guard let self else { return }
             self.idleSamplesNet = net
             self.idleSamplesDisk = disk
-            if !net  { self.prevNet  = nil }
-            if !disk { self.prevDisk = nil }
+            // Drop the clock with the counter. A nil counter already forces
+            // a re-baseline on its own, so this is not load-bearing today;
+            // it keeps the pair in step so a later edit cannot leave a live
+            // clock beside a dropped counter, which is the exact shape of
+            // the reopen spike.
+            if !net  { self.prevNet  = nil; self.netClock.reset() }
+            if !disk { self.prevDisk = nil; self.diskClock.reset() }
         }
     }
 

@@ -150,6 +150,7 @@ public struct GlyphRenderer {
             Self.measure("999MB", font: vFont),
             Self.measure("999GB", font: vFont)
         )
+        self.percentReservedW = Self.measure("100%", font: vFont)
     }
 
     /// Cheap identity of what `render` would draw for this snapshot. Two
@@ -239,14 +240,12 @@ public struct GlyphRenderer {
     private func measureCell(_ cell: BarCell, snapshot: MetricsSnapshot) -> CGFloat {
         switch cell {
         case .cpu:
-            let text = Self.cpuPercentText(snapshot)
-            let textW = max(Self.measure(text, font: valueFont),
-                            Self.measure("00%", font: valueFont))
+            let textW = max(Self.measure(Self.cpuPercentText(snapshot), font: valueFont),
+                            percentReservedW)
             return density.iconPt + density.elementGap + density.barW + density.elementGap + textW
         case .mem:
-            let text = Self.memPercentText(snapshot)
-            let textW = max(Self.measure(text, font: valueFont),
-                            Self.measure("00%", font: valueFont))
+            let textW = max(Self.measure(Self.memPercentText(snapshot), font: valueFont),
+                            percentReservedW)
             return density.iconPt + density.elementGap + density.barW + density.elementGap + textW
         case .net:
             return throughputCellWidth(
@@ -280,6 +279,13 @@ public struct GlyphRenderer {
     /// 5-char reserved width — wide enough for every value `formatBps`
     /// can produce. Measured once at init; see the init comment.
     private let throughputValueReservedW: CGFloat
+
+    /// Reserved width for a percentage cell: "100%", the widest string these
+    /// cells can produce. It was "00%", which is 26 pt against 33 pt at 11 pt
+    /// type, so a CPU reaching 100% grew its cell by 7 pt and shifted every
+    /// menu-bar item to the left of ours. Full CPU is ordinary, not an edge
+    /// case. The battery cell always reserved "100%"; these two did not.
+    private let percentReservedW: CGFloat
 
     public func accessibilityValue(snapshot: MetricsSnapshot) -> String {
         cells.map { accessibilityFor(cell: $0, snapshot: snapshot) }

@@ -559,18 +559,55 @@ func runSelfTest() -> Int32 {
               "got \(GlyphDensity.compact.leftPad + GlyphDensity.compact.rightPad)")
 
         // Width stability is the property the reserved columns exist for and
-        // the one most at risk from narrowing. Same cells, wildly different
-        // values, identical width.
-        var busy = MetricsSnapshot.initial()
-        busy.net = .ok(Throughput(inPerSec: 943_718_400, outPerSec: 943_718_400))
-        busy.disk = .ok(Throughput(inPerSec: 1, outPerSec: 1))
-        let r = GlyphRenderer(cells: [.cpu, .mem, .net, .disk], activityArrows: true,
-                              throughputUnit: .bytesPerSec, thresholds: .defaults,
-                              density: .compact)
-        check("glyph width does not change with value magnitude",
-              r.totalWidth(snapshot: busy) == r.totalWidth(snapshot: snap),
-              String(format: "%.0f vs %.0f", r.totalWidth(snapshot: busy),
-                     r.totalWidth(snapshot: snap)))
+        // the one most at risk from narrowing. A status item that changes
+        // width shifts every neighbour on every tick.
+        //
+        // The first version of this varied only NET and DISK, so it passed
+        // while the compute cells grew 7 pt at 100% — the reserved width was
+        // "00%", not "100%". Vary EVERY cell across its full range, and walk
+        // the percentages rather than sampling two of them.
+        func loaded(_ frac: Double, _ inBps: Double, _ outBps: Double) -> MetricsSnapshot {
+            var s = MetricsSnapshot.initial()
+            s.cpu = .ok(CPUSample(overall: frac, perCore: []))
+            s.memory = .ok(MemorySample(usedBytes: UInt64(frac * 64_000_000_000),
+                                        totalBytes: 64_000_000_000,
+                                        swapUsedBytes: 0, pressure: .normal))
+            s.net = .ok(Throughput(inPerSec: inBps, outPerSec: outBps))
+            s.disk = .ok(Throughput(inPerSec: outBps, outPerSec: inBps))
+            return s
+        }
+        for cells in [[BarCell.cpu, .mem], [.cpu, .mem, .net, .disk], [.cpu, .mem, .net, .disk, .battery]] {
+            for density in [GlyphDensity.standard, .compact] {
+                let r = GlyphRenderer(cells: cells, activityArrows: true,
+                                      throughputUnit: .bytesPerSec,
+                                      thresholds: .defaults, density: density)
+                let reference = r.totalWidth(snapshot: loaded(0, 0, 0))
+                var widest = reference
+                var culprit = "none"
+                // Every whole percent, plus throughput spanning bytes to GB.
+                for pct in 0...100 {
+                    let f = Double(pct) / 100.0
+                    for bps in [0.0, 1, 999, 1024, 1_048_576, 999_000_000, 9_999_999_999] {
+                        let w = r.totalWidth(snapshot: loaded(f, bps, bps / 3))
+                        if w > widest { widest = w; culprit = "\(pct)% at \(Int(bps)) B/s" }
+                    }
+                }
+                check("width is constant across every load and rate (\(cells.count) cells, \(density.valuePt == 11 ? "standard" : "compact"))",
+                      widest == reference,
+                      String(format: "grew %.0f -> %.0f pt at %@", reference, widest, culprit))
+            }
+        }
+        // The specific regression: a cell at 100% must not be wider than one
+        // at 0%, which is what "00%" as the reserved string got wrong.
+        let pctRenderer = GlyphRenderer(cells: [.cpu, .mem], activityArrows: true,
+                                        throughputUnit: .bytesPerSec, thresholds: .defaults,
+                                        density: .standard)
+        check("100% is not wider than 0% (reserved string is \"100%\", not \"00%\")",
+              pctRenderer.totalWidth(snapshot: loaded(1.0, 0, 0))
+                == pctRenderer.totalWidth(snapshot: loaded(0.0, 0, 0)),
+              String(format: "%.0f vs %.0f",
+                     pctRenderer.totalWidth(snapshot: loaded(1.0, 0, 0)),
+                     pctRenderer.totalWidth(snapshot: loaded(0.0, 0, 0))))
     }
 
     print("Menu-bar room classification")
