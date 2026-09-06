@@ -4,10 +4,16 @@ Plan of record for the next build session. Ruled with the owner 2026-09-06 again
 mocks at `.claude/output/20260906-panel-mocks/mocks.html` and the research under
 `.claude/output/20260906-monitor-capabilities/`.
 
-Status: reviewed 2026-09-06, partly built. Done: severity on the memory side,
-expand and collapse with the memory pools view, and the power segment. Not done:
-CPU severity, and expansion for the CPU and NET sections. See "Still open" at the
-end for what is waiting on a ruling. The adversarial review is at
+Status: reviewed 2026-09-06, partly built.
+
+Built and rendered: memory severity from reclaim evidence with the subtitle that
+explains it, expand and collapse on the CPU and MEM sections, the memory pools
+view, the per-core heatmap, and the power segment. Also `--probe-panel`, which
+renders the panel headlessly to PNG so a layout can be looked at rather than
+reasoned about.
+
+Not built: CPU severity, and expansion for the NET/DISK, storage and energy
+sections. See "Still open" at the end. The adversarial review is at
 `.claude/output/20260906-panel-v3-review/review.md` and it did not pass the plan as
 written. Findings S3 through S9 are folded into the sections below. Three sections stay
 open on an owner ruling and are marked UNDER REVIEW where they sit: severity (§3, the
@@ -67,7 +73,16 @@ problem that expansion solves better.
 
 Persist the expanded set in `SettingsStore` so the panel reopens as the user left it.
 
-### CPU expanded
+### CPU expanded  ·  HEATMAP BUILT 2026-09-06 (`4e4ad9f`)
+
+The heatmap ships behind the CPU caret, grouped by cluster with the split and
+the labels read from `hw.perflevelN`. That machine reports "Super" with 6 cores
+and "Performance" with 12, so the conventional P and E guess would have been
+wrong in both the naming and the counts. The heatmap was built ahead of the
+open question below because it belongs in the expansion under either answer.
+
+Measured from the render: collapsed 464 pt, CPU expanded 562 pt, so the
+expansion costs 98 pt and the collapsed panel is unchanged.
 
 > UNDER REVIEW (S2a). The bar strip below already ships and is on by default:
 > `CoreStrip` at `PanelRootView.swift:936`, rendered at `:170` under
@@ -129,7 +144,12 @@ own row; it becomes the expanded state instead. DISK expands to per-process disk
 > default view. Same gate as the CPU strip above: this needs the owner's approval, not a
 > plan sentence. DISK expanding to per-process rate is new work and is unaffected.
 
-## 2. Subtitles carry felt severity, not a second number
+## 2. Subtitles carry felt severity, not a second number  ·  MEMORY BUILT (`e578cb4`)
+
+The memory row states what the machine is doing to find memory, text only, no
+dot and no second bar. An unmeasured machine reads "settling" rather than "no
+reclaim", because those are different facts and rendering them alike is false
+reassurance on the first tick after a wake.
 
 Each section's subtitle line becomes the place where saturation and stall evidence is
 stated in words. The owner's constraint, verbatim: the subtitles can show the felt
@@ -203,11 +223,14 @@ report `ri_energy_nj` without root, asserted in the suite rather than assumed.
 
 - Add `pwr` to `SettingsStore.ProcSort` (`SettingsStore.swift:29`, today
   `case cpu, mem, disk, net`) and a fifth segment to the picker at `:406`.
-- **Decide the picker width first (review S3).** This is a blocker on §4, not only on
-  §5. The width at `:419` is a binary ternary on one availability flag; a fifth segment
-  makes availability two-dimensional, so it must become a function of segment count.
-  Widening competes with the search field inside 360 pt, and leaving it at 156 pt gives
-  31 pt per segment.
+- **The picker width, settled by rendering it (`e006a84`).** S3 was right that this
+  blocked §4 and not only §5, and the cause was not the number. A segmented picker
+  given a fixed frame wider than the space left does not shrink, it draws past the
+  panel edge, so 187, 170, 153 and 140 pt all clipped alike. Below five segments the
+  shipped frame is kept exactly; at five the control takes its intrinsic width and the
+  flexible filter box absorbs the difference. The PROCESSES label is pinned so it
+  stops wrapping, and the filter placeholder is "find" because "filter" clipped in the
+  narrower box.
 - Per-process watts from `ri_energy_nj`, deltaed over the process sampling interval.
   Confirmed live on this machine: the field is a cumulative nanojoule counter readable
   for every visible pid without root, from the `proc_pid_rusage` call
@@ -305,6 +328,9 @@ need to force collapsed. The real risk is the opposite one, the process list hit
 
 ## Still open, on an owner ruling
 
+Everything else in this plan is built. These are the items no amount of further
+work resolves, because each needs a judgement rather than a measurement.
+
 1. Which confirmer drives CPU severity, given the fixed-work probe's CPU cost.
 2. Whether the per-core bar strip, which ships on by default today, moves into the CPU
    expanded state and so leaves the default view.
@@ -314,3 +340,13 @@ need to force collapsed. The real risk is the opposite one, the process list hit
 Questions 2 and 3 are gated by `rules/no-silent-ui-surface-deletion.md`: both surfaces
 appeared in owner-reviewed rounds, so moving them out of the default view needs the
 owner's approval rather than a plan sentence.
+
+4. What the NET/DISK, storage and energy sections expand to, and where a caret
+   goes on NET/DISK at all. That row is two cells sharing one line with no
+   header, so a caret means inventing a header, which changes a layout the plan
+   promises not to touch. Storage and energy have no expanded content specified
+   anywhere in this plan, so building one means designing it.
+
+Until question 4 is answered, "every metric section expands" cannot be finished
+as written: two sections have nowhere to put the control and two have nothing to
+put behind it.
