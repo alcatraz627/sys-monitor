@@ -51,6 +51,18 @@ public struct MemoryRaw: Sendable {
     public let speculativeBytes: UInt64
     public let physicalTotalBytes: UInt64
     public let swapUsedBytes: UInt64
+
+    /// Cumulative pages the compressor has taken in. Rising means memory is
+    /// being squeezed, which on its own is the OS working as designed.
+    public let compressions: UInt64
+    /// Cumulative pages faulted back OUT of the compressor. This is the half
+    /// that costs the user time: a thread asked for a page and had to wait
+    /// for it to be decompressed.
+    public let decompressions: UInt64
+    /// Cumulative pages faulted back from disk. Same stall as a
+    /// decompression and far more expensive.
+    public let swapins: UInt64
+    public let swapouts: UInt64
 }
 
 /// Cumulative byte counters from the network interfaces, summed across all

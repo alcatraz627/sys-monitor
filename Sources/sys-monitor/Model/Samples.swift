@@ -27,6 +27,35 @@ public struct MemorySample: Sendable, Equatable {
     public let totalBytes: UInt64
     public let swapUsedBytes: UInt64
     public let pressure: MemoryPressure
+    /// What the MEM colour keys on. Deliberately separate from
+    /// `usedBytes / totalBytes`, which stays the bar fill and the number: a
+    /// machine can sit at 71% and thrash, or at 90% and be perfectly calm.
+    public let severity: MemorySeverity
+    /// Nil until two samples exist, so a rate can be computed.
+    public let reclaim: ReclaimRate?
+}
+
+/// Three levels, matching the existing green / amber / red ramp. Comparable so
+/// that combining two independent signals is `max`, which is the whole policy:
+/// any signal may raise severity and none may lower another's.
+public enum MemorySeverity: Sendable, Equatable, Comparable {
+    case normal, warn, critical
+}
+
+/// Reclaim activity as rates. Levels say what the kernel decided; rates say
+/// what the machine is doing, which is what fires below the kernel's own
+/// escalation point.
+public struct ReclaimRate: Sendable, Equatable {
+    /// Pages per second faulted back in, decompressions plus swapins. The
+    /// half the user feels, because a thread waited for each one.
+    public let stallPagesPerSec: Double
+    /// Pages per second pushed out, compressions plus swapouts.
+    public let evictPagesPerSec: Double
+
+    public init(stallPagesPerSec: Double, evictPagesPerSec: Double) {
+        self.stallPagesPerSec = stallPagesPerSec
+        self.evictPagesPerSec = evictPagesPerSec
+    }
 }
 
 /// Bytes-per-second throughput, used for network and disk rows.

@@ -100,6 +100,12 @@ public final class SamplingCoordinator: @unchecked Sendable {
     /// healthy; the stale thing was the counter, not the clock.
     private var netClock = RateMath.SampleClock()
     private var diskClock = RateMath.SampleClock()
+    /// Memory is read every tick in both tiers, so its clock never diverges
+    /// from the tick the way NET and DISK do. It owns one anyway, because the
+    /// reclaim counters are cumulative and the rule from `0090c05` is that a
+    /// rate divides by ITS metric's elapsed time, not by whatever tick fired.
+    private var memClock = RateMath.SampleClock()
+    private var prevMemRaw: MemoryRaw?
 
     // Process enumeration runs every 2nd open tick (it's the open tier's
     // dominant cost, and a 2 s %CPU window is less noisy than 1 s anyway).
@@ -457,6 +463,13 @@ public final class SamplingCoordinator: @unchecked Sendable {
         lastProcSampleTime = 0
         netClock.reset()
         diskClock.reset()
+        // Memory's baseline would survive a tier switch correctly, since it is
+        // sampled in both tiers and SampleClock already judges the cadence
+        // change. It is dropped with its counter anyway, to keep the pair in
+        // step: a live clock beside a dropped counter is the reopen-spike
+        // shape, and the cost here is one tick of reclaim rate.
+        memClock.reset()
+        prevMemRaw = nil
         lastProcMetric = .measuring
     }
 
@@ -480,7 +493,7 @@ public final class SamplingCoordinator: @unchecked Sendable {
 
         refreshPressureLevel()
         let cpuMetric  = readOverallCPU(now: now, isGap: isGap)
-        let memMetric  = readMemory(now: now)
+        let memMetric  = readMemory(now: now, cadence: idleCadenceSeconds)
         let netMetric: Metric<Throughput> = idleSamplesNet
             ? readNet(now: now, cadence: idleCadenceSeconds)
             : .measuring
@@ -511,7 +524,7 @@ public final class SamplingCoordinator: @unchecked Sendable {
 
         refreshPressureLevel()
         let cpuMetric  = readFullCPU(now: now, isGap: isGap)
-        let memMetric  = readMemory(now: now)
+        let memMetric  = readMemory(now: now, cadence: openCadenceSeconds)
         let netMetric  = readNet(now: now, cadence: openCadenceSeconds)
         let diskMetric = readDisk(now: now, cadence: openCadenceSeconds)
 
@@ -585,17 +598,39 @@ public final class SamplingCoordinator: @unchecked Sendable {
         return .ok(CPUSample(overall: overall, perCore: perCore))
     }
 
-    private func readMemory(now: TimeInterval) -> Metric<MemorySample> {
-        do {
-            let raw = try memSampler.read()
-            if raw.physicalTotalBytes > 0 {
-                let frac = Double(raw.usedBytes) / Double(raw.physicalTotalBytes)
-                memHistory.append(HistoryPoint(timestamp: now, value: frac))
-            }
-            return .ok(raw.toSample(pressure: currentPressure))
-        } catch {
+    private func readMemory(now: TimeInterval, cadence: Double) -> Metric<MemorySample> {
+        let (elapsed, isGap) = memClock.evaluate(
+            now: now, cadence: cadence, gapMultiplier: gapMultiplier)
+
+        let raw: MemoryRaw
+        // A failed read drops the baseline with the clock, so recovery
+        // re-baselines instead of deltaing an outage's worth of pages over
+        // one tick. Same pairing rule as NET and DISK.
+        do { raw = try memSampler.read() } catch {
+            prevMemRaw = nil
+            memClock.reset()
             return .unavailable
         }
+        defer { prevMemRaw = raw; memClock.stamp(now: now, cadence: cadence) }
+
+        if raw.physicalTotalBytes > 0 {
+            let frac = Double(raw.usedBytes) / Double(raw.physicalTotalBytes)
+            memHistory.append(HistoryPoint(timestamp: now, value: frac))
+        }
+
+        // Unlike NET and DISK, a missing rate never downgrades this metric to
+        // `.measuring`: memory is instantaneous and ships `.ok` on the first
+        // sample (FR-16). Only `reclaim` waits for a second reading.
+        var reclaim: ReclaimRate?
+        if let prev = prevMemRaw, !isGap,
+           let decomp  = RateMath.pagesPerSec(prev: prev.decompressions, now: raw.decompressions, elapsed: elapsed),
+           let swapin  = RateMath.pagesPerSec(prev: prev.swapins,        now: raw.swapins,        elapsed: elapsed),
+           let comp    = RateMath.pagesPerSec(prev: prev.compressions,   now: raw.compressions,   elapsed: elapsed),
+           let swapout = RateMath.pagesPerSec(prev: prev.swapouts,       now: raw.swapouts,       elapsed: elapsed) {
+            reclaim = ReclaimRate(stallPagesPerSec: decomp + swapin,
+                                  evictPagesPerSec: comp + swapout)
+        }
+        return .ok(raw.toSample(pressure: currentPressure, reclaim: reclaim))
     }
 
     private func readNet(now: TimeInterval, cadence: Double) -> Metric<Throughput> {

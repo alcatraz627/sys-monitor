@@ -66,7 +66,11 @@ public struct MemorySampler: Sampler {
             purgeableBytes: purgeableBytes,
             speculativeBytes: speculativeBytes,
             physicalTotalBytes: physicalTotalBytes,
-            swapUsedBytes: swap.xsu_used
+            swapUsedBytes: swap.xsu_used,
+            compressions: vm.compressions,
+            decompressions: vm.decompressions,
+            swapins: vm.swapins,
+            swapouts: vm.swapouts
         )
     }
 }
@@ -103,12 +107,17 @@ public extension MemoryRaw {
     // No default for `pressure` — a silent `.normal` fallback is exactly
     // how the panel shipped a hardcoded pressure value in v1. Callers
     // must state where the level came from.
-    func toSample(pressure: MemoryPressure) -> MemorySample {
+    /// `reclaim` is nil only on the first sample, before a rate exists. It is
+    /// explicit for the same reason `pressure` is: a silent nil would read as
+    /// "no reclaim" rather than "not measured yet".
+    func toSample(pressure: MemoryPressure, reclaim: ReclaimRate?) -> MemorySample {
         MemorySample(
             usedBytes: usedBytes,
             totalBytes: physicalTotalBytes,
             swapUsedBytes: swapUsedBytes,
-            pressure: pressure
+            pressure: pressure,
+            severity: RateMath.memorySeverity(pressure: pressure, reclaim: reclaim),
+            reclaim: reclaim
         )
     }
 }

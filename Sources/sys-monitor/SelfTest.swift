@@ -582,7 +582,8 @@ func runSelfTest() -> Int32 {
             s.cpu = .ok(CPUSample(overall: frac, perCore: []))
             s.memory = .ok(MemorySample(usedBytes: UInt64(frac * 64_000_000_000),
                                         totalBytes: 64_000_000_000,
-                                        swapUsedBytes: 0, pressure: .normal))
+                                        swapUsedBytes: 0, pressure: .normal,
+                                        severity: .normal, reclaim: nil))
             s.net = .ok(Throughput(inPerSec: inBps, outPerSec: outBps))
             s.disk = .ok(Throughput(inPerSec: outBps, outPerSec: inBps))
             return s
@@ -658,6 +659,104 @@ func runSelfTest() -> Int32 {
     check("self footprint readable + sane (1 MB … 4 GB)",
           fp > 1_048_576 && fp < 4_294_967_296, "got \(fp) bytes")
 
+    // ---- Memory severity fires on reclaim, not on percent used -------------
+    // The trigger these pin: 71% while thrashing must not read calm, and 90%
+    // with no reclaim must not read alarming. Ordinary operation on the dev
+    // machine measured exactly 0.0 stall pages/sec over 30 s, so any sustained
+    // fault-back is already abnormal.
+    print("Memory severity — reclaim evidence, not percent used")
+    do {
+        func sev(_ pressure: MemoryPressure, stall: Double, evict: Double = 0) -> MemorySeverity {
+            RateMath.memorySeverity(
+                pressure: pressure,
+                reclaim: ReclaimRate(stallPagesPerSec: stall, evictPagesPerSec: evict))
+        }
+
+        check("first sample has no rate, so the kernel alone decides",
+              RateMath.memorySeverity(pressure: .normal, reclaim: nil) == .normal)
+        check("a quiet machine is calm", sev(.normal, stall: 0) == .normal)
+        check("sustained fault-back warns while the kernel is still normal",
+              sev(.normal, stall: 200) == .warn,
+              "this is the 71%-while-thrashing case the old percent trigger read as calm")
+        check("heavy fault-back is critical", sev(.normal, stall: 5000) == .critical)
+
+        // The kernel level is a floor. Both directions, because a one-way
+        // guard passes while the other direction is broken.
+        check("kernel warn raises a quiet reading", sev(.warn, stall: 0) == .warn)
+        check("kernel critical raises a quiet reading", sev(.critical, stall: 0) == .critical)
+        check("a quiet kernel cannot lower a bad rate", sev(.normal, stall: 5000) == .critical)
+        check("kernel warn cannot lower a critical rate", sev(.warn, stall: 5000) == .critical)
+
+        // Eviction is the OS working as designed; only fault-back costs time.
+        check("eviction alone never raises severity",
+              sev(.normal, stall: 0, evict: 100_000) == .normal,
+              "compressions without decompressions is the compressor doing its job")
+
+        // The whole point: severity must not track the fraction.
+        let page: UInt64 = 16384
+        func sample(usedPages: UInt64, stall: Double) -> MemorySample {
+            let raw = MemoryRaw(
+                activeBytes: 0, wiredBytes: 0, compressedBytes: 0,
+                freeBytes: 0, inactiveBytes: 0,
+                internalBytes: usedPages * page, externalBytes: 0, purgeableBytes: 0,
+                speculativeBytes: 0, physicalTotalBytes: 100 * page, swapUsedBytes: 0,
+                compressions: 0, decompressions: 0, swapins: 0, swapouts: 0)
+            return raw.toSample(
+                pressure: .normal,
+                reclaim: ReclaimRate(stallPagesPerSec: stall, evictPagesPerSec: 0))
+        }
+        let thrashingAt71 = sample(usedPages: 71, stall: 200)
+        let calmAt90 = sample(usedPages: 90, stall: 0)
+        check("71% while thrashing is not calm", thrashingAt71.severity == .warn,
+              "got \(thrashingAt71.severity)")
+        check("90% with no reclaim is calm", calmAt90.severity == .normal,
+              "got \(calmAt90.severity)")
+        check("…and the fraction really is the wrong way round in that pair",
+              Double(thrashingAt71.usedBytes) < Double(calmAt90.usedBytes),
+              "the fixture cannot detect a percent-driven revert")
+        check("toSample carries severity through, not a hardcoded normal",
+              sample(usedPages: 10, stall: 5000).severity == .critical)
+        check("reclaim rate survives onto the sample",
+              thrashingAt71.reclaim?.stallPagesPerSec == 200)
+
+        // The glyph is the always-visible light, so it must key on the same
+        // evidence as the panel. It recomputed severity from percent used
+        // until 2026-09-06, which left the menu bar carrying the bug the
+        // panel had just been fixed for.
+        func snapWithMemory(_ s: MemorySample) -> MetricsSnapshot {
+            var snap = MetricsSnapshot.initial()
+            snap.memory = .ok(s)
+            return snap
+        }
+        let glyph = GlyphRenderer(cells: [.mem])
+        let quiet = snapWithMemory(sample(usedPages: 40, stall: 0))
+        let thrashing = snapWithMemory(sample(usedPages: 40, stall: 5000))
+        check("glyph severity follows reclaim, at an identical percentage",
+              glyph.renderKey(snapshot: quiet) != glyph.renderKey(snapshot: thrashing),
+              "both keys are \(glyph.renderKey(snapshot: quiet)), so the glyph is still percent-driven")
+        // The key is "m<state><pct>|<barfill>|<severity>", so everything
+        // before the last separator is the percent-driven half. If that
+        // differed, the pair would prove nothing about severity.
+        func keyWithoutSeverity(_ k: String) -> String {
+            k.split(separator: "|").dropLast().joined(separator: "|")
+        }
+        check("…and the percent-driven half really is identical in that pair",
+              keyWithoutSeverity(glyph.renderKey(snapshot: quiet))
+                  == keyWithoutSeverity(glyph.renderKey(snapshot: thrashing)),
+              "the fixture varies the percent too, so it cannot detect a revert")
+        check("glyph reads critical off the sample",
+              glyph.renderKey(snapshot: thrashing).contains("critical"),
+              "got \(glyph.renderKey(snapshot: thrashing))")
+
+        // Cumulative page counters wrap the same way byte counters do.
+        check("page rate over a normal delta",
+              RateMath.pagesPerSec(prev: 100, now: 300, elapsed: 2) == 100)
+        check("a backwards page counter re-baselines",
+              RateMath.pagesPerSec(prev: 300, now: 100, elapsed: 2) == nil)
+        check("zero elapsed re-baselines",
+              RateMath.pagesPerSec(prev: 100, now: 300, elapsed: 0) == nil)
+    }
+
     // ---- System memory formula (docs/12-parity-baseline.md #3) -------------
     // These fail if usedBytes reverts to active+wired+compressed.
     print("System memory formula — app memory, not page queues")
@@ -677,7 +776,8 @@ func runSelfTest() -> Int32 {
             purgeableBytes:    10 * page,
             speculativeBytes:   8 * page,
             physicalTotalBytes: 200 * page,
-            swapUsedBytes: 0
+            swapUsedBytes: 0,
+            compressions: 0, decompressions: 0, swapins: 0, swapouts: 0
         )
         check("app memory = internal − purgeable",
               raw.appBytes == 130 * page, "got \(raw.appBytes / page) pages")
@@ -697,7 +797,8 @@ func runSelfTest() -> Int32 {
             activeBytes: 0, wiredBytes: 0, compressedBytes: 0, freeBytes: 1 * page,
             inactiveBytes: 0,
             internalBytes: 1 * page, externalBytes: 0, purgeableBytes: 9 * page,
-            speculativeBytes: 9 * page, physicalTotalBytes: 10 * page, swapUsedBytes: 0)
+            speculativeBytes: 9 * page, physicalTotalBytes: 10 * page, swapUsedBytes: 0,
+            compressions: 0, decompressions: 0, swapins: 0, swapouts: 0)
         check("purgeable > internal clamps to 0, no unsigned wrap", odd.appBytes == 0)
         check("speculative > free clamps to 0, no unsigned wrap", odd.trulyFreeBytes == 0)
     }

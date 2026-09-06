@@ -153,7 +153,8 @@ MainActor.assumeIsolated {
         var snap = MetricsSnapshot.initial()
         snap.cpu = .ok(CPUSample(overall: 0.26, perCore: []))
         snap.memory = .ok(MemorySample(usedBytes: 32 << 30, totalBytes: 64 << 30,
-                                       swapUsedBytes: 0, pressure: .normal))
+                                       swapUsedBytes: 0, pressure: .normal,
+                                       severity: .normal, reclaim: nil))
         snap.net = .ok(Throughput(inPerSec: 1_572_864, outPerSec: 138_240))
         snap.disk = .ok(Throughput(inPerSec: 361_472, outPerSec: 12_582_912))
 

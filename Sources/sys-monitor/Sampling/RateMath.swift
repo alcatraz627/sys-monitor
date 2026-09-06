@@ -104,6 +104,53 @@ public enum RateMath {
         }
     }
 
+    /// Pages/sec between two cumulative page counters. Same wrap rule as
+    /// `bytesPerSec`: a backwards counter is `nil`, meaning re-baseline.
+    public static func pagesPerSec(prev: UInt64, now: UInt64, elapsed: TimeInterval) -> Double? {
+        guard elapsed > 0, now >= prev else { return nil }
+        return Double(now - prev) / elapsed
+    }
+
+    /// What the MEM colour keys on, from reclaim evidence rather than percent
+    /// used. Percent used stays the bar fill and the number.
+    ///
+    /// The kernel's own level is a FLOOR, never a ceiling: it can raise the
+    /// result but never lower it, because when memorystatus has escalated the
+    /// machine is already in trouble whatever the rates say. The rates then
+    /// add sensitivity below that point, which is the 71%-while-thrashing case
+    /// the percent-driven trigger reads as calm today.
+    ///
+    /// Thresholds are anchored to measurement, not taste. On this machine
+    /// during ordinary use, decompressions and swapins were sustained at
+    /// exactly 0.0 pages/sec across 30 s, and swap had not been touched since
+    /// boot (2026-09-06, `reclaim_probe.py`). Any sustained fault-back is
+    /// therefore already abnormal, so the warn anchor sits low.
+    ///
+    /// Caveat, deliberate: this is a pure function of one interval, so a
+    /// single-tick burst on an app launch can show amber for one tick. The
+    /// debounce that would suppress that lives in `AlertEvaluator` and is not
+    /// wired here yet.
+    public static func memorySeverity(pressure: MemoryPressure,
+                                      reclaim: ReclaimRate?,
+                                      warnPagesPerSec: Double = 50,
+                                      criticalPagesPerSec: Double = 1000) -> MemorySeverity {
+        let fromKernel: MemorySeverity
+        switch pressure {
+        case .normal:   fromKernel = .normal
+        case .warn:     fromKernel = .warn
+        case .critical: fromKernel = .critical
+        }
+        guard let reclaim else { return fromKernel }
+
+        let fromRate: MemorySeverity
+        switch reclaim.stallPagesPerSec {
+        case ..<warnPagesPerSec:     fromRate = .normal
+        case ..<criticalPagesPerSec: fromRate = .warn
+        default:                     fromRate = .critical
+        }
+        return max(fromKernel, fromRate)
+    }
+
     /// Whether the interval since the last tick is too long to delta across —
     /// a "gap" that forces a re-baseline. The threshold is judged against the
     /// LARGER of the current cadence and the cadence the previous tick was

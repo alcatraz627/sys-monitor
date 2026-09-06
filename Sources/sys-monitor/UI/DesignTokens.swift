@@ -44,6 +44,18 @@ public enum DesignTokens {
         }
     }
 
+    /// The same three colours, for a metric whose severity is decided from
+    /// evidence rather than from a fraction crossing a threshold. Memory uses
+    /// this: percent used still fills the bar, but reclaim activity picks the
+    /// colour.
+    public static func severityColor(_ s: MemorySeverity) -> Color {
+        switch s {
+        case .normal:   return .green
+        case .warn:     return .orange
+        case .critical: return .red
+        }
+    }
+
     // MARK: - Spacing
 
     public enum Space {

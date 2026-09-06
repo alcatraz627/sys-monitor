@@ -182,11 +182,9 @@ struct PanelRootView: View {
                 Spacer()
                 Text(memValueText)
                     .font(DesignTokens.numericFont(size: 12, weight: .medium))
-                    .foregroundStyle(memLoad >= settings.severityThresholds.memWarn
-                        ? DesignTokens.loadColor(memLoad,
-                            warn: settings.severityThresholds.memWarn,
-                            critical: settings.severityThresholds.memCritical)
-                        : Color.primary)
+                    .foregroundStyle(memSeverity == .normal
+                        ? Color.primary
+                        : DesignTokens.severityColor(memSeverity))
             }
             // Auto-scale because memory sits in a narrow band; minSpan
             // keeps the trace from amplifying single-percent jitter.
@@ -768,6 +766,14 @@ struct PanelRootView: View {
             return Double(s.usedBytes) / Double(s.totalBytes)
         }
         return 0
+    }
+
+    /// What colours the MEM row. Percent used still fills the bar and prints
+    /// the number; it stopped deciding the colour on 2026-09-06, because 71%
+    /// while thrashing read calm and 90% with no reclaim read alarming.
+    private var memSeverity: MemorySeverity {
+        if case .ok(let s) = store.snapshot.memory { return s.severity }
+        return .normal
     }
 
     private var memValueText: String {

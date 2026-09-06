@@ -195,7 +195,7 @@ public struct GlyphRenderer {
                 parts.append("c\(state(snapshot.cpu))\(Self.cpuPercentText(snapshot))|\(Int(load * 32))|\(sev)")
             case .mem:
                 let load = Self.memLoad(snapshot)
-                let sev = Self.severity(load: load, warn: thresholds.memWarn, critical: thresholds.memCritical)
+                let sev = Self.memSeverity(snapshot, warn: thresholds.memWarn, critical: thresholds.memCritical)
                 parts.append("m\(state(snapshot.memory))\(Self.memPercentText(snapshot))|\(Int(load * 32))|\(sev)")
             case .net:
                 let d = Self.netDownBps(snapshot), u = Self.netUpBps(snapshot)
@@ -328,7 +328,7 @@ public struct GlyphRenderer {
                 symbol: "memorychip",
                 load: Self.memLoad(snapshot),
                 valueText: Self.memPercentText(snapshot),
-                severity: Self.severity(load: Self.memLoad(snapshot), warn: thresholds.memWarn, critical: thresholds.memCritical),
+                severity: Self.memSeverity(snapshot, warn: thresholds.memWarn, critical: thresholds.memCritical),
                 identityColor: identity, in: rect
             )
         case .net:
@@ -548,6 +548,21 @@ public struct GlyphRenderer {
         if load >= critical { return .critical }
         if load >= warn     { return .warn }
         return .normal
+    }
+
+    /// Memory's colour is decided on the sample, from reclaim evidence, so the
+    /// glyph and the panel cannot disagree about the same metric. The percent
+    /// ramp is the fallback only when there is no sample to read.
+    fileprivate static func memSeverity(_ s: MetricsSnapshot,
+                                        warn: Double, critical: Double) -> Severity {
+        guard case .ok(let v) = s.memory else {
+            return severity(load: memLoad(s), warn: warn, critical: critical)
+        }
+        switch v.severity {
+        case .normal:   return .normal
+        case .warn:     return .warn
+        case .critical: return .critical
+        }
     }
 
     // MARK: - Snapshot → display values
