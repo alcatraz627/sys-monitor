@@ -261,14 +261,29 @@ func runSelfTest() -> Int32 {
               PanelRootView.formatWatts(3.5) == "3.50W",
               "got \(PanelRootView.formatWatts(3.5))")
 
-        // The width must grow with the segment count. It was a ternary on one
-        // availability flag, which a fifth segment makes wrong (review S3).
-        let four = PanelRootView.pickerWidth(segments: 4)
-        let five = PanelRootView.pickerWidth(segments: 5)
-        check("the picker widens for a fifth segment", five > four,
-              "4 segments \(four) pt, 5 segments \(five) pt")
-        check("the picker still fits inside the 360 pt panel beside a search field",
-              five <= 200, "\(five) pt leaves nothing for the search field")
+        // The shipped widths, unchanged. The original ternary encoded exactly
+        // this, and reverting to a formula must not move either value.
+        check("three segments keep their shipped width",
+              PanelRootView.pickerWidth(segments: 3) == 124,
+              "got \(PanelRootView.pickerWidth(segments: 3))")
+        check("four segments keep their shipped width",
+              PanelRootView.pickerWidth(segments: 4) == 156,
+              "got \(PanelRootView.pickerWidth(segments: 4))")
+
+        // PWR is deliberately absent from the control. Rendered 2026-09-06, a
+        // five-segment segmented picker overflows this header at every frame
+        // width and label length tried, so the segment waits on a layout
+        // ruling while the sort itself works.
+        check("the control offers four segments when per-process net is up",
+              PanelRootView.pickerSorts(perProcessNet: true).count == 4,
+              "got \(PanelRootView.pickerSorts(perProcessNet: true))")
+        check("and three when it is not",
+              PanelRootView.pickerSorts(perProcessNet: false).count == 3,
+              "got \(PanelRootView.pickerSorts(perProcessNet: false))")
+        check("PWR is withheld from the control pending the layout ruling",
+              !PanelRootView.pickerSorts(perProcessNet: true).contains(.pwr))
+        check("…while remaining a real sort the rest of the code honours",
+              SettingsStore.ProcSort.allCases.contains(.pwr))
 
         // Watts must survive the raw path, the same wiring a revert to RSS
         // once broke silently for memory.
@@ -280,7 +295,6 @@ func runSelfTest() -> Int32 {
         check("watts defaults to zero rather than nil-ing the row",
               ProcSample(raw: raw, cpu: 0, diskBps: 0, netBps: 0).watts == 0)
 
-        check("pwr is a real sort option", SettingsStore.ProcSort.allCases.contains(.pwr))
         check("every sort option has a short segment label",
               SettingsStore.ProcSort.allCases.allSatisfy { $0.segmentLabel.count <= 4 },
               "a long label will not fit 31 pt")

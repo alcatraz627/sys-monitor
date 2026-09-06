@@ -776,11 +776,26 @@ struct PanelRootView: View {
         return 0
     }
 
-    /// NET appears only when the per-process monitor is available, so the
-    /// segment count is 4 or 5 rather than fixed.
     private var availableSorts: [SettingsStore.ProcSort] {
-        SettingsStore.ProcSort.allCases.filter {
-            $0 != .net || store.snapshot.perProcessNetAvailable
+        Self.pickerSorts(perProcessNet: store.snapshot.perProcessNetAvailable)
+    }
+
+    /// Which sorts the segmented control offers.
+    ///
+    /// NET appears only when the per-process monitor is available. PWR is
+    /// withheld from the control, and that is a measurement rather than a
+    /// preference: rendered on 2026-09-06, a five-segment segmented picker
+    /// overflows this header inside 360 pt at every frame width and label
+    /// length tried, because the control enforces an intrinsic minimum from
+    /// its labels and the row already carries the PROCESSES label and the
+    /// filter box. Making it fit means shortening the header, moving the
+    /// control to its own row, or dropping a segment, each of which changes a
+    /// layout the owner asked to keep. The watts, the ranking and the filter
+    /// all work; only the segment waits on that ruling.
+    static func pickerSorts(perProcessNet: Bool) -> [SettingsStore.ProcSort] {
+        SettingsStore.ProcSort.allCases.filter { s in
+            if s == .pwr { return false }
+            return s != .net || perProcessNet
         }
     }
 
@@ -810,14 +825,10 @@ struct PanelRootView: View {
         return String(format: "%.2fW", w)
     }
 
-    /// Picker width from the number of segments, not a nested ternary.
-    ///
-    /// The width was a binary ternary on one availability flag until a fifth
-    /// segment made availability two-dimensional. 31 pt per segment is what a
-    /// five-segment control actually gets here, which is why the labels are
-    /// three and four characters rather than words.
+    /// Picker width from the number of segments, which is what the original
+    /// availability ternary encoded: 3 segments 124 pt, 4 segments 156 pt.
     static func pickerWidth(segments: Int) -> CGFloat {
-        CGFloat(max(1, segments)) * 31 + 32
+        CGFloat(max(1, segments)) * 32 + 28
     }
 
     @ViewBuilder

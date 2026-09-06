@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 
 // sys-monitor — entry point.
 //
@@ -184,6 +185,140 @@ MainActor.assumeIsolated {
             try? png.write(to: URL(fileURLWithPath: path))
             print(String(format: "%-16s %6.0f pt  %@", (name as NSString).utf8String!,
                          r.totalWidth(snapshot: snap), path))
+        }
+        exit(0)
+    }
+
+    // Render the panel itself to a PNG, the same reason --probe-glyph exists:
+    // a layout reasoned about is not a layout seen. Runs headless, with the
+    // window parked far offscreen and the activation policy set to prohibited,
+    // so it never takes focus from whoever is at the keyboard.
+    if let i = CommandLine.arguments.firstIndex(of: "--probe-panel") {
+        let dir = (i + 1 < CommandLine.arguments.count && !CommandLine.arguments[i + 1].hasPrefix("--"))
+            ? CommandLine.arguments[i + 1] : NSTemporaryDirectory()
+        let app = NSApplication.shared
+        app.setActivationPolicy(.prohibited)
+
+        func procs(_ n: Int) -> [ProcSample] {
+            let names = ["firefox", "node", "Xcode", "WindowServer", "kernel_task",
+                         "Slack", "zsh", "mds_stores", "sys-monitor", "Terminal"]
+            var out: [ProcSample] = []
+            for k in 0..<n {
+                let pid = Int32(100 + k)
+                let name: String = names[k % names.count]
+                let cpu: Double = Double(20 - k) / 12.0
+                let mem: UInt64 = UInt64(2_400_000_000 / (k + 1))
+                let disk: Double = Double(9_000_000 / (k + 1))
+                let net: Double = Double(4_000_000 / (k + 1))
+                let watts: Double = Double(30 - k * 3) / 100.0
+                out.append(ProcSample(pid: pid, ppid: 1, name: name, cpu: cpu,
+                                      memBytes: mem, diskBps: disk, netBps: net,
+                                      watts: watts))
+            }
+            return out
+        }
+
+        func snapshot(reclaim: ReclaimRate?, severity: MemorySeverity,
+                      pressure: MemoryPressure) -> MetricsSnapshot {
+            var s = MetricsSnapshot.initial()
+            s.cpu = .ok(CPUSample(overall: 0.34,
+                                  perCore: (0..<18).map { Double(($0 * 7) % 100) / 100.0 }))
+            s.memory = .ok(MemorySample(
+                usedBytes: 40_200 * 1_048_576, totalBytes: 65_536 * 1_048_576,
+                swapUsedBytes: 0, pressure: pressure, severity: severity,
+                reclaim: reclaim,
+                pools: MemoryPools(appBytes: 21_000 * 1_048_576,
+                                   wiredBytes: 7_060 * 1_048_576,
+                                   compressedBytes: 24 * 1_048_576,
+                                   cachedFilesBytes: 22_652 * 1_048_576,
+                                   freeBytes: 2_196 * 1_048_576)))
+            s.net = .ok(Throughput(inPerSec: 1_572_864, outPerSec: 138_240))
+            s.disk = .ok(Throughput(inPerSec: 361_472, outPerSec: 12_582_912))
+            s.diskSpace = DiskSpaceSample(freeBytes: 210 * 1_073_741_824,
+                                          totalBytes: 994 * 1_073_741_824)
+            s.processes = .ok(procs(10))
+            s.perProcessNetAvailable = true
+            s.loadAverage = LoadAverage(one: 3.1, five: 2.8, fifteen: 2.4,
+                                        uptimeSeconds: 3 * 86400 + 4 * 3600)
+            return s
+        }
+
+        struct PanelCase {
+            let name: String
+            let snap: MetricsSnapshot
+            let expanded: Set<SettingsStore.PanelSection>
+            let sort: SettingsStore.ProcSort
+        }
+        let calm = ReclaimRate(stallPagesPerSec: 0, evictPagesPerSec: 0)
+        let busy = ReclaimRate(stallPagesPerSec: 640, evictPagesPerSec: 900)
+        var cases: [PanelCase] = []
+        cases.append(PanelCase(name: "collapsed-calm",
+                               snap: snapshot(reclaim: calm, severity: .normal, pressure: .normal),
+                               expanded: [], sort: .cpu))
+        cases.append(PanelCase(name: "mem-expanded",
+                               snap: snapshot(reclaim: calm, severity: .normal, pressure: .normal),
+                               expanded: [.mem], sort: .cpu))
+        cases.append(PanelCase(name: "mem-thrashing",
+                               snap: snapshot(reclaim: busy, severity: .warn, pressure: .normal),
+                               expanded: [.mem], sort: .cpu))
+        cases.append(PanelCase(name: "power-sort",
+                               snap: snapshot(reclaim: calm, severity: .normal, pressure: .normal),
+                               expanded: [], sort: .pwr))
+
+        for c in cases {
+            let name = c.name, snap = c.snap, expanded = c.expanded, sort = c.sort
+            let store = MetricsStore()
+            store.snapshot = snap
+            let suite = "probe.panel.\(name)"
+            let defaults = UserDefaults(suiteName: suite)!
+            defaults.removePersistentDomain(forName: suite)
+            let settings = SettingsStore(defaults: defaults)
+            settings.expandedSections = expanded
+            settings.defaultSort = sort
+            let panelState = PanelState()
+
+            let root = PanelRootView(onShowSettings: {})
+                .environmentObject(store)
+                .environmentObject(settings)
+                .environmentObject(panelState)
+            let host = NSHostingController(rootView: root)
+
+            // Parked at -20000: rendered by the window server, visible to
+            // nobody. orderFront on a .prohibited app cannot activate it.
+            let window = NSWindow(contentRect: NSRect(x: -20000, y: -20000, width: 360, height: 720),
+                                  styleMask: [.borderless], backing: .buffered, defer: false)
+            window.contentViewController = host
+            window.backgroundColor = .clear
+            window.orderFront(nil)
+            window.displayIfNeeded()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.6))
+
+            guard let view = window.contentView else { continue }
+            view.layoutSubtreeIfNeeded()
+            let bounds = view.bounds
+            guard let rep = view.bitmapImageRepForCachingDisplay(in: bounds) else { continue }
+            view.cacheDisplay(in: bounds, to: rep)
+
+            // Composite onto a mid grey. The panel's material is vibrancy,
+            // which caches as transparent, and a bare alpha channel reads as
+            // white in a viewer and hides every contrast problem.
+            let out = NSImage(size: bounds.size)
+            out.lockFocus()
+            NSColor(calibratedWhite: 0.16, alpha: 1).setFill()
+            NSRect(origin: .zero, size: bounds.size).fill()
+            NSImage(size: bounds.size, flipped: false, drawingHandler: { r in
+                rep.draw(in: r); return true
+            }).draw(at: .zero, from: .zero, operation: .sourceOver, fraction: 1)
+            out.unlockFocus()
+
+            guard let tiff = out.tiffRepresentation,
+                  let bmp = NSBitmapImageRep(data: tiff),
+                  let png = bmp.representation(using: .png, properties: [:]) else { continue }
+            let path = (dir as NSString).appendingPathComponent("panel-\(name).png")
+            try? png.write(to: URL(fileURLWithPath: path))
+            print(String(format: "%-16s %4.0f x %4.0f  %@", (name as NSString).utf8String!,
+                         bounds.width, bounds.height, path))
+            window.orderOut(nil)
         }
         exit(0)
     }
