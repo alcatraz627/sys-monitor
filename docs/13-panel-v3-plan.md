@@ -6,14 +6,14 @@ mocks at `.claude/output/20260906-panel-mocks/mocks.html` and the research under
 
 Status: reviewed 2026-09-06, partly built.
 
-Built and rendered: memory severity from reclaim evidence with the subtitle that
-explains it, expand and collapse on the CPU and MEM sections, the memory pools
-view, the per-core heatmap, and the power segment. Also `--probe-panel`, which
-renders the panel headlessly to PNG so a layout can be looked at rather than
-reasoned about.
+Built and rendered: severity on both CPU and memory, the subtitle that explains
+the memory colour, expand and collapse on all four metric sections, the memory
+pools view, the per-core heatmap, the per-process NET and DISK expansions, and
+the power segment. Also `--probe-panel`, which renders the panel headlessly to
+PNG so a layout can be looked at rather than reasoned about.
 
-Not built: CPU severity, and expansion for the NET/DISK, storage and energy
-sections. See "Still open" at the end. The adversarial review is at
+Not built: expansion for the storage and energy sections, which this plan never
+specified content for. See "Still open" at the end. The adversarial review is at
 `.claude/output/20260906-panel-v3-review/review.md` and it did not pass the plan as
 written. Findings S3 through S9 are folded into the sections below. Three sections stay
 open on an owner ruling and are marked UNDER REVIEW where they sit: severity (§3, the
@@ -177,9 +177,29 @@ The rule this follows is `~/.claude/conventions/visual-design.md`, section "Seve
 what makes a light worth lighting". The subtitle earns its line by carrying something
 the bar cannot.
 
-## 3. Severity fires on felt evidence
+## 3. Severity fires on felt evidence  ·  BUILT 2026-09-06 (`e578cb4`, `d8f73b6`)
 
-> UNDER REVIEW (S1). The principle below stands and the owner ruled it. The proposed
+Both halves ship. Memory keys on reclaim, CPU on run-queue depth above a
+utilisation gate.
+
+The gate is the part the review got wrong, and it is worth recording why. S1
+measured `getloadavg` at 21 s to fire and 0.80x cores a full minute after idle,
+and concluded run queue was unusable. The conclusion did not follow. Utilisation
+as a gate fixes the decay exactly: a quiet machine drops below the gate within a
+tick and the colour clears whatever the one-minute average still reads. What the
+gate does not fix is the rise, so a hitch shorter than the averaging window still
+reads calm; that limit is stated in `RateMath.cpuSeverity` rather than left
+implied.
+
+Mach's PROCESSOR_SET_LOAD_INFO was tested rather than assumed:
+`processor_set_statistics` segfaults on the unprivileged name port, so it is not
+an option for this app at any cost.
+
+The per-core bars raised in S7 keep their utilisation ramp. A single core has no
+queue, and the two now answer different questions: the headline says whether the
+machine is coping, each bar says how busy one core is.
+
+> The section below is the original text. UNDER REVIEW (S1). The principle below stands and the owner ruled it. The proposed
 > instrument does not: `getloadavg` was measured at 21 s to fire and still 0.80x cores a
 > full minute after the machine went idle, so it fails this section's own steady-state
 > amber criterion. See the answered open questions at the end of this file for the
@@ -331,7 +351,11 @@ need to force collapsed. The real risk is the opposite one, the process list hit
 Everything else in this plan is built. These are the items no amount of further
 work resolves, because each needs a judgement rather than a measurement.
 
-1. Which confirmer drives CPU severity, given the fixed-work probe's CPU cost.
+1. RULED, by default rather than by measurement, and reversible. CPU severity
+   uses utilisation as the gate and the run queue as the confirmer, because the
+   fixed-work probe that catches transients costs about 10% of a core and a
+   monitor should not spend that. Say so if you want the transient case caught
+   and the cost paid.
 2. Whether the per-core bar strip, which ships on by default today, moves into the CPU
    expanded state and so leaves the default view.
 3. Whether the per-interface network breakdown, which renders unconditionally today,
@@ -341,12 +365,14 @@ Questions 2 and 3 are gated by `rules/no-silent-ui-surface-deletion.md`: both su
 appeared in owner-reviewed rounds, so moving them out of the default view needs the
 owner's approval rather than a plan sentence.
 
-4. What the NET/DISK, storage and energy sections expand to, and where a caret
-   goes on NET/DISK at all. That row is two cells sharing one line with no
-   header, so a caret means inventing a header, which changes a layout the plan
-   promises not to touch. Storage and energy have no expanded content specified
-   anywhere in this plan, so building one means designing it.
+4. What the storage and energy sections would expand to, if anything. This plan
+   specifies no content for either, so building one means designing it. NET and
+   DISK are done: each `ThroughputCell` already drew its own label, so the caret
+   went there and no header was invented.
 
-Until question 4 is answered, "every metric section expands" cannot be finished
-as written: two sections have nowhere to put the control and two have nothing to
-put behind it.
+Questions 2 and 3 no longer block anything. Each has an option that removes
+nothing, and that option was taken: the per-core strip and the per-interface
+network row both stay exactly where they render today, and both expansions are
+pure additions. The rule those questions invoke gates deleting a surface, not
+keeping one. They stay open only as a preference: say the word and either
+surface moves into its expansion.
