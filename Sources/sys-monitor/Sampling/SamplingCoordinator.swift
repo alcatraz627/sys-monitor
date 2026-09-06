@@ -70,6 +70,10 @@ public final class SamplingCoordinator: @unchecked Sendable {
     /// actor for each fired alert (notification posting is UI work).
     private var alertEvaluator = AlertEvaluator(config: .defaults)
     private var onAlert: (@MainActor @Sendable ([AlertEvent]) -> Void)?
+    /// The user's severity thresholds, pushed in the same way the alert config
+    /// is. The alert gate needs the same CPU gate the colours use, or the
+    /// notification and the menu bar disagree about the same machine.
+    private var currentThresholds: SeverityThresholds = .defaults
 
     // Rate-metric prev state. Each one is "the last raw reading we saw,"
     // or nil if we haven't taken a baseline yet (or just dropped one due
@@ -170,6 +174,10 @@ public final class SamplingCoordinator: @unchecked Sendable {
     /// through the queue because the evaluator is queue-isolated state.
     public func updateAlertConfig(_ config: AlertConfig) {
         queue.async { [weak self] in self?.alertEvaluator.config = config }
+    }
+
+    public func updateSeverityThresholds(_ t: SeverityThresholds) {
+        queue.async { [weak self] in self?.currentThresholds = t }
     }
 
     /// Set the sparkline history window (seconds) on all four ring buffers.
@@ -571,10 +579,11 @@ public final class SamplingCoordinator: @unchecked Sendable {
             disk: diskMetric,
             power: powerMetric,
             battery: batterySampler.read(),
-            // Panel-tier facts — only read while the panel is open, since
-            // nothing renders them otherwise.
+            // Storage is panel-tier: nothing renders it while the panel is
+            // shut. Load average is not, because the glyph's CPU colour keys
+            // on it, so `idleTick` reads it too.
             diskSpace: diskSpaceSampler.read(),
-            loadAverage: loadSampler.read(),   // also read in idle, see below
+            loadAverage: loadSampler.read(),
             perInterfaceNet: lastPerInterfaceNet
         )
     }
@@ -752,7 +761,6 @@ public final class SamplingCoordinator: @unchecked Sendable {
             prevProcDisk.removeAll(keepingCapacity: true)
             prevProcNet.removeAll(keepingCapacity: true)
             prevProcEnergy.removeAll(keepingCapacity: true)
-        prevProcEnergy.removeAll(keepingCapacity: true)
             lastProcSampleTime = 0
             return .unavailable
         }
@@ -824,6 +832,25 @@ public final class SamplingCoordinator: @unchecked Sendable {
         return .ok(samples)
     }
 
+    /// The colours' own verdict, so the notification cannot disagree with what
+    /// the menu bar is showing. Returning `.normal` suppresses the alert for
+    /// that metric entirely: a machine that looks calm must not buzz.
+    private func severityForAlerts(cpu: Metric<CPUSample>,
+                                   memory: Metric<MemorySample>,
+                                   loadAverage: LoadAverage?) -> (cpu: MetricSeverity, mem: MetricSeverity) {
+        var cpuSev: MetricSeverity = .normal
+        if case .ok(let c) = cpu {
+            let cores = Double(ProcessInfo.processInfo.activeProcessorCount)
+            let q = loadAverage.map { $0.one / max(cores, 1) }
+            cpuSev = RateMath.cpuSeverity(utilisation: c.overall,
+                                          runQueuePerCore: q,
+                                          gate: currentThresholds.cpuWarn)
+        }
+        var memSev: MetricSeverity = .normal
+        if case .ok(let m) = memory { memSev = m.severity }
+        return (cpuSev, memSev)
+    }
+
     // MARK: - Publish
 
     private func publishSnapshot(
@@ -872,10 +899,21 @@ public final class SamplingCoordinator: @unchecked Sendable {
         // Evaluate alerts on the queue (the evaluator is queue-isolated).
         // Loads are nil when the metric isn't .ok this tick → the evaluator
         // treats that as "no reading" and won't alert on missing data.
-        let cpuLoad: Double? = { if case .ok(let v) = cpu { return v.overall } else { return nil } }()
+        //
+        // The alert is a third surface and must agree with the other two. Fed
+        // the raw fractions it fired on a busy-but-responsive machine while
+        // the glyph and panel stayed green, and stayed silent at 71% while
+        // thrashing when both of them went amber. So it is gated by the same
+        // severity the colours use, and the user's threshold then decides how
+        // far past that it has to go.
+        let sev = severityForAlerts(cpu: cpu, memory: memory, loadAverage: loadAverage)
+        let cpuLoad: Double? = {
+            guard case .ok(let v) = cpu, sev.cpu != .normal else { return nil }
+            return v.overall
+        }()
         let memLoad: Double? = {
-            if case .ok(let v) = memory, v.totalBytes > 0 { return Double(v.usedBytes) / Double(v.totalBytes) }
-            return nil
+            guard case .ok(let v) = memory, v.totalBytes > 0, sev.mem != .normal else { return nil }
+            return Double(v.usedBytes) / Double(v.totalBytes)
         }()
         let alerts = alertEvaluator.evaluate(cpuLoad: cpuLoad, memLoad: memLoad, now: monoSeconds())
         let alertHandler = onAlert

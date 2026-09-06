@@ -16,7 +16,7 @@ public struct MetricsSnapshot: Sendable, Equatable {
     public var power: Metric<PowerSample>
     public var battery: BatterySample?   // nil on desktops or while unread
     public var diskSpace: DiskSpaceSample? = nil   // boot volume; panel-tier only
-    public var loadAverage: LoadAverage? = nil     // load + uptime; panel-tier only
+    public var loadAverage: LoadAverage? = nil     // load + uptime; read in both tiers
     public var perInterfaceNet: [InterfaceThroughput] = []  // NET breakdown; panel-tier
     public var cpuHistory: RingBuffer
     /// One history per core, for the expanded heatmap. Empty in the idle
@@ -128,6 +128,7 @@ public struct ProcGroup: Sendable, Equatable, Identifiable {
     public var memBytes: UInt64 { members.reduce(0) { $0 &+ $1.memBytes } }
     public var diskBps: Double { members.reduce(0) { $0 + $1.diskBps } }
     public var netBps: Double { members.reduce(0) { $0 + $1.netBps } }
+    public var watts: Double { members.reduce(0) { $0 + $1.watts } }
 
     /// Roll samples up to their outermost visible ancestor.
     ///

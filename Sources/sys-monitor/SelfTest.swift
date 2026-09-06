@@ -297,6 +297,37 @@ func runSelfTest() -> Int32 {
         check("watts defaults to zero rather than nil-ing the row",
               ProcSample(raw: raw, cpu: 0, diskBps: 0, netBps: 0).watts == 0)
 
+        // Grouping and watts shipped in the same diff and cancelled each other:
+        // the grouped row was rebuilt without watts, so the PWR column read
+        // 0mW for every row and the pwr sort fell back to its tiebreaker.
+        // Nothing crossed the two features until a reviewer's probe did.
+        do {
+            func proc(_ pid: Int32, _ ppid: Int32, _ name: String, _ w: Double) -> ProcSample {
+                ProcSample(pid: pid, ppid: ppid, name: name, cpu: 0, memBytes: 0,
+                           diskBps: 0, netBps: 0, watts: w)
+            }
+            let tree = [proc(10, 1, "app", 0.10), proc(11, 10, "app helper", 0.20),
+                        proc(12, 11, "app renderer", 0.05)]
+            let groups = ProcGroup.group(tree)
+            // Summed doubles, so compare with a tolerance: 0.10 + 0.20 + 0.05
+            // is 0.35000000000000003 and an exact test fails on a correct sum.
+            check("a tree rolls its watts up like every other rate",
+                  abs((groups.first?.watts ?? -1) - 0.35) < 1e-9,
+                  "got \(groups.first?.watts ?? -1); a grouped PWR column would read 0mW")
+            check("…and the roll-up is not just the root's own draw",
+                  groups.first?.watts != 0.10)
+
+            // The wiring, not the aggregate. The bug was in the row rebuild
+            // while every ProcGroup aggregate was already correct, so a guard
+            // pointed at ProcGroup stays green through it.
+            let rows = PanelRootView.collapseTrees(tree, enabled: true)
+            check("the grouped ROW carries the tree's watts",
+                  abs((rows.first?.watts ?? -1) - 0.35) < 1e-9,
+                  "got \(rows.first?.watts ?? -1); this is the PWR column reading 0mW")
+            check("grouping off leaves the rows alone",
+                  PanelRootView.collapseTrees(tree, enabled: false).count == 3)
+        }
+
         check("every sort option has a short segment label",
               SettingsStore.ProcSort.allCases.allSatisfy { $0.segmentLabel.count <= 4 },
               "a long label will not fit 31 pt")

@@ -869,7 +869,8 @@ struct PanelRootView: View {
     /// The calm phrase is deliberate rather than an empty string. Blank reads
     /// as "not measured", and this line is the only place that says why the
     /// MEM colour did or did not fire.
-    static func reclaimPhrase(_ r: ReclaimRate?, pageSize: Double = 16384) -> String {
+    static func reclaimPhrase(_ r: ReclaimRate?,
+                              pageSize: Double = Double(vm_kernel_page_size)) -> String {
         guard let r else { return "settling" }
         if r.stallPagesPerSec <= 0 { return "no reclaim" }
         let mbPerSec = r.stallPagesPerSec * pageSize / 1_048_576
@@ -968,11 +969,19 @@ struct PanelRootView: View {
     /// members survived a search, and sort, pin and the row cap keep working
     /// on rows without knowing they stand for more than one process.
     private func collapsedIntoTrees(_ procs: [ProcSample]) -> [ProcSample] {
-        guard settings.groupProcesses else { return procs }
+        Self.collapseTrees(procs, enabled: settings.groupProcesses)
+    }
+
+    /// Static so a guard can exercise the row-building itself. Testing
+    /// `ProcGroup`'s aggregates instead proves nothing about this: the watts
+    /// bug lived here, in the rebuild, while every aggregate was correct, and
+    /// a guard aimed at the helper stayed green through it.
+    static func collapseTrees(_ procs: [ProcSample], enabled: Bool) -> [ProcSample] {
+        guard enabled else { return procs }
         return ProcGroup.group(procs).map { g in
             ProcSample(pid: g.root.pid, ppid: g.root.ppid,
                        name: g.name, cpu: g.cpu, memBytes: g.memBytes,
-                       diskBps: g.diskBps, netBps: g.netBps)
+                       diskBps: g.diskBps, netBps: g.netBps, watts: g.watts)
         }
     }
 

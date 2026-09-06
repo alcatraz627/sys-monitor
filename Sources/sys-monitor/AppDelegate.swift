@@ -84,6 +84,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let notifier = alertNotifier
         coordinator.setAlertHandler { events in notifier.post(events) }
         coordinator.updateAlertConfig(settings.alertConfig)
+        coordinator.updateSeverityThresholds(settings.severityThresholds)
         coordinator.updateHistoryWindow(settings.historyWindowSeconds)
 
         // Global hotkey (⌥⌘M) toggles the panel from any app — same action
@@ -131,6 +132,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .sink { [weak statusItemController] unit in
                 statusItemController?.updateThroughputUnit(unit)
             }
+            .store(in: &cancellables)
+
+        settings.$severityThresholds.dropFirst()
+            .sink { [weak coordinator] t in coordinator?.updateSeverityThresholds(t) }
             .store(in: &cancellables)
 
         settings.$severityThresholds.dropFirst()
