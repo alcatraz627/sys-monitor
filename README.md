@@ -119,11 +119,13 @@ private-framework readers degrade gracefully if a source isn't present.
 | Area | What you get |
 |------|--------------|
 | **Menu bar** | Pick & reorder any of CPU · Memory · Network · Disk · Battery. CPU/MEM = icon · bar · `%`; NET/DISK = icon · ↓/↑ throughput; Battery = level · `%`. Fixed identity colors; load colors at **adjustable** thresholds; optional compact density; **bytes/s or bits/s**. |
-| **Panel** | CPU (+ per-core strip + sparkline) · memory + swap + pressure · network & disk throughput (**per-interface split** when >1 active) · **storage** free/total · **energy** (per-block watts on Apple Silicon + battery) · process list · load-avg + uptime · self-cost readout. |
-| **Process list** | Top-N by CPU / memory / disk / network · filter by name, pid, or threshold (`>5:cpu`, `<300:mem`, `>1:disk`) · **pin** to top · expand a row for path + **Terminate / Force-Kill / Focus / Copy path / Reveal** · EMA-smoothed ranking · freeze-on-hover. |
+| **Panel** | CPU (+ per-core strip + sparkline) · memory + swap + pressure + what it is reclaiming · network & disk throughput (**per-interface split** when >1 active) · **storage** free/total · **energy** (per-block watts on Apple Silicon + battery) · process list · load-avg + uptime · self-cost readout. |
+| **Expand a section** | Every metric section opens for detail, and the collapsed panel stays exactly the height it was. CPU → a **per-core heatmap** over the window, grouped by the machine's own performance clusters. Memory → the five **pools** (app · wired · compressed · cached · free) as one composition bar plus the figures. NET / DISK → the **processes behind the number**, ranked. The open set persists. |
+| **Process list** | Top-N by CPU / memory / disk / network / **power** · filter by name, pid, or threshold (`>5:cpu`, `<300:mem`, `>1:disk`, `>1:pwr`) · **pin** to top · expand a row for path + **Terminate / Force-Kill / Focus / Copy path / Reveal** · EMA-smoothed ranking · freeze-on-hover. |
+| **Colours that mean something** | CPU turns warm on **run-queue depth** above a utilisation gate, not on being busy: a machine at 94% doing exactly what you asked stays calm. Memory turns warm on **reclaim evidence**, not percent used: 71% while thrashing is not calm, 90% idle is not alarming. The subtitle says which, in words. |
 | **Alerts** | Opt-in notification when CPU/memory stays high for a sustained window — the one signal useful while the panel is closed. Debounced + cooldown. |
 | **Footer** | Settings · copy a text snapshot of all readings · open Activity Monitor · quit. |
-| **Settings** (all live) | Sampling cadences · bar cells + order · throughput unit · severity thresholds · alerts · process count + sort · history window (60–300 s) · display toggles · launch-at-login · reset-to-defaults. |
+| **Settings** (all live) | Sampling cadences · bar cells + order · throughput unit · CPU busy gate · alerts · process count + sort · history window (60–300 s) · display toggles · launch-at-login · reset-to-defaults. |
 | **Global / lifecycle** | **⌥⌘M** toggles the panel from any app · right-click menu shows the top consumer · sleep/wake + display-sleep + occlusion handled so the first sample after a gap never shows a bogus spike. |
 
 ---
@@ -178,8 +180,18 @@ coverage is `sys-monitor --self-test` plus the drills in `tools/drills/`.
 
 ## Status
 
-v1, v2, and v2.1 shipped — the full feature set above is live. The one piece
-held back: a **per-cluster CPU-frequency (GHz) panel row** — the IOReport
+v1, v2, v2.1 and the v3 panel work shipped — the full feature set above is live.
+
+v3 was mostly about telling the truth. System memory was reading page-queue
+sizes rather than app memory and under-reported by 5.4 GiB on the dev machine;
+per-process memory reported RSS where Activity Monitor reports footprint, and
+the two are different quantities rather than two scales of one. Reopening the
+panel divided a whole closed period of bytes by a single tick. Alongside those,
+the colours moved off thresholds and onto evidence, and every metric section
+learned to expand. `--probe-panel` renders the panel to PNG headlessly, which
+is how two layout bugs were found that no assertion noticed.
+
+The one piece held back: a **per-cluster CPU-frequency (GHz) panel row** — the IOReport
 engine and a `--probe-freq` validation tool exist, but the residency→frequency
 alignment needs validation against `powermetrics` before it's wired, so it
 isn't shown rather than risk a misleading number (see the perf audit + the
