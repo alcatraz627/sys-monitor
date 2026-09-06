@@ -53,7 +53,7 @@ main thread (AppKit + SwiftUI)                 background serial queue
 | `SamplingCoordinator.swift` | The two-tier state machine; owns timers, rate math, all queue-isolated state, alert evaluation, and `publishSnapshot` |
 | `Sampler.swift` | The sampler protocol + errors |
 | `CPUSampler` · `MemorySampler` · `NetworkSampler` · `DiskSampler` · `ProcessSampler` | Core mach/sysctl/libproc reads |
-| `RateMath.swift` | Pure rate functions (tick-wrap-safe util, bytes/sec, gap detection) — heavily unit-tested |
+| `RateMath.swift` | Pure rate functions (tick-wrap-safe util, bytes/sec, pages/sec, gap detection, per-metric `SampleClock`) plus the two severity policies, `cpuSeverity` and `memorySeverity` — heavily unit-tested |
 | `RingBuffer.swift` | Time-windowed history (value type, COW); adjustable window |
 | `PerProcessNetworkMonitor.swift` | Private NetworkStatistics framework (per-pid net) |
 | `PowerMonitor.swift` | Private IOReport energy counters → CPU/GPU/ANE watts |
@@ -78,7 +78,7 @@ main thread (AppKit + SwiftUI)                 background serial queue
 |------|------|
 | `PanelRootView.swift` | The whole panel: every row, the process list + interactions, footer actions, self-cost |
 | `GraphView.swift` | The sparkline renderer |
-| `DesignTokens.swift` | Colors, spacing, the load-color ramp |
+| `DesignTokens.swift` | Colors, spacing, the load-color ramp, the severity colours and the CPU heat scale |
 
 ### `Settings/`
 `SettingsStore.swift` (the persisted `@Published` settings + helpers) and
@@ -87,15 +87,21 @@ main thread (AppKit + SwiftUI)                 background serial queue
 ### Entry points
 `main.swift` dispatches: default → the app; `--self-test` → the regression
 suite; `--probe` → headless sampler readout; `--probe-freq` → frequency
-validation; `--preview-widget` → the glyph design harness; `--dev-autoquit` →
-the isolated dev-build self-terminator.
+validation; `--preview-widget` → the glyph design harness; `--probe-panel` →
+renders the panel itself to PNG, headless and without taking focus, so a layout
+can be looked at rather than reasoned about; `--dev-autoquit` → the isolated
+dev-build self-terminator.
 
 ## Feature → where it lives
 
 | Feature | Primary files |
 |---------|---------------|
 | Menu-bar cells (CPU/MEM/NET/DISK/Battery), reorder, compact, bytes↔bits | `GlyphRenderer`, `SettingsStore`, `StatusItemController` |
-| Severity thresholds (adjustable) | `DesignTokens.loadColor`, `GlyphRenderer.severity`, `SettingsStore` |
+| CPU severity: run queue, gated by utilisation | `RateMath.cpuSeverity` ← `PanelRootView.cpuSeverity` + `GlyphRenderer.cpuSeverityCell` |
+| Memory severity: reclaim evidence, not percent used | `RateMath.memorySeverity` ← `MemorySampler.toSample`; the wording in `PanelRootView.reclaimPhrase` |
+| Expand / collapse per metric section | `SettingsStore.PanelSection` + `expandedSections` → `PanelRootView` (`CoreHeatmap`, `MemoryPoolsView`, `ThroughputCell.topConsumers`) |
+| Per-process watts | `ProcRaw.energyNanojoules` (`ri_energy_nj`) → `SamplingCoordinator.prevProcEnergy` → `ProcSample.watts` |
+| Per-core strip + the expanded heatmap | `PanelRootView.CoreStrip` (collapsed) · `CoreHeatmap` over `MetricsSnapshot.perCoreHistory` |
 | Threshold alerts | `AlertEvaluator` (logic) + `AlertNotifier` (I/O) + coordinator hook |
 | Power / battery / storage / load rows | `PowerMonitor` · `BatterySampler` · `DiskSpaceSampler` · `LoadSampler` → `PanelRootView` |
 | Per-interface network split | `NetworkSampler` + `SamplingCoordinator.perInterfaceRates` |
@@ -109,7 +115,12 @@ the isolated dev-build self-terminator.
 
 - `sys-monitor --self-test` — the runnable regression suite (rate math,
   formatters, settings persistence, alert state machine, DVFS parsing, sampler
-  invariants). Exit 0 = pass.
+  invariants, both severity policies). Exit 0 = pass. It prints no total, so
+  count with `rg -c '^  ok   '` on its output.
+- `sys-monitor --probe-panel <dir>` — the panel rendered to PNG in six states.
+  A layout reasoned about is not a layout seen: this caught a header that slid
+  down the screen and a picker that drew past the panel edge, neither of which
+  any assertion noticed.
 - `tools/drills/` — timed behavioral drills (tier transitions, pressure, sleep).
 - `docs/09-manual-checks.md` — the human-glance list for pixels/interactions
   that can't be checked headlessly.

@@ -51,6 +51,25 @@ every neighbour on every tick.
 | 9 | Glyph on notched display | 411 pt against a 664 pt strip, 62% | fits with room |
 | 12 | Process attribution | flat list; Chrome 3853 MB across 41 procs shows as 245 MB | rolled up |
 | 13 | Process coverage | 620 of 941 pids; comment claims "ALL processes" | stated honestly |
+| 14 | CPU colour | fires on utilisation, so 94% busy and responsive reads alarming | run queue above a utilisation gate |
+| 15 | Memory colour | fires at 75% used, so 71% while thrashing reads calm | reclaim evidence, no percent trigger |
+
+### Confirmed live, 2026-09-06
+
+Row 3 shipped and was checked against the running app rather than the suite.
+With `vm_stat` reading app 1588915, wired 237502, compressor-occupied 1523
+pages at 16 KiB, the new build's glyph read 44% and the old build's read 35%
+on the same machine at the same moment. The old formula was under-reporting by
+5.4 GiB.
+
+Rows 14 and 15 shipped the same day. The instrument behind row 14 was measured
+before it was trusted: `getloadavg` on Darwin took 21 s to cross the saturation
+line under a 2x step load and still read 0.80x cores a full minute after the
+load stopped. That decay is why the trigger is gated on utilisation rather than
+driven by the queue alone; a quiet machine drops below the gate within one tick
+and the colour clears regardless of what the one-minute average still says.
+Mach's `PROCESSOR_SET_LOAD_INFO` was tried as a faster source and rejected:
+`processor_set_statistics` segfaults on the unprivileged name port.
 
 ### Reference measurements at baseline
 
