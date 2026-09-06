@@ -337,6 +337,42 @@ func runSelfTest() -> Int32 {
               DesignTokens.cpuHeatOpacity(-1) == DesignTokens.cpuHeatOpacity(0))
     }
 
+    print("NET and DISK expanded — who is behind the number")
+    do {
+        func proc(_ name: String, net: Double, disk: Double) -> ProcSample {
+            ProcSample(pid: 1, ppid: 0, name: name, cpu: 0, memBytes: 0,
+                       diskBps: disk, netBps: net)
+        }
+        let list: Metric<[ProcSample]> = .ok([
+            proc("quiet", net: 0, disk: 0),
+            proc("small", net: 100, disk: 5),
+            proc("big", net: 9_000, disk: 50),
+            proc("mid", net: 500, disk: 900),
+        ])
+        let byNet = PanelRootView.topConsumers(list, by: { $0.netBps })
+        check("busiest first", byNet.first?.name == "big", "got \(byNet.map(\.name))")
+        check("a process doing nothing is not listed",
+              !byNet.contains { $0.name == "quiet" },
+              "an idle machine would list every process at 0")
+        check("the limit is honoured",
+              PanelRootView.topConsumers(list, by: { $0.netBps }, limit: 2).count == 2)
+        check("net and disk rank independently",
+              PanelRootView.topConsumers(list, by: { $0.diskBps }).first?.name == "mid",
+              "got \(PanelRootView.topConsumers(list, by: { $0.diskBps }).map(\.name))")
+        check("no processes yields no rows",
+              PanelRootView.topConsumers(.measuring, by: { $0.netBps }).isEmpty)
+
+        // NET and DISK share a row but not a caret: one asks which process is
+        // talking, the other which is reading.
+        let suite = "selftest.netdisk.sections"
+        let d = UserDefaults(suiteName: suite)!
+        d.removePersistentDomain(forName: suite)
+        let st = SettingsStore(defaults: d)
+        st.toggleSection(.net)
+        check("expanding NET leaves DISK collapsed",
+              st.expandedSections == [.net], "got \(st.expandedSections)")
+    }
+
     print("SettingsStore — expanded metric sections")
     do {
         let suite = "selftest.expanded.rt"

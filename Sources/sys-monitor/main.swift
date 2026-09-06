@@ -283,6 +283,9 @@ MainActor.assumeIsolated {
         cases.append(PanelCase(name: "cpu-expanded",
                                snap: snapshot(reclaim: calm, severity: .normal, pressure: .normal),
                                expanded: [.cpu], sort: .cpu))
+        cases.append(PanelCase(name: "netdisk-expanded",
+                               snap: snapshot(reclaim: calm, severity: .normal, pressure: .normal),
+                               expanded: [.net, .disk], sort: .cpu))
         cases.append(PanelCase(name: "power-sort",
                                snap: snapshot(reclaim: calm, severity: .normal, pressure: .normal),
                                expanded: [], sort: .pwr))

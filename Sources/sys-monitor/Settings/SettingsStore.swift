@@ -30,7 +30,7 @@ public final class SettingsStore: ObservableObject {
     /// persisted identity, so renaming a case silently forgets that section's
     /// state; add cases, do not rename them.
     public enum PanelSection: String, CaseIterable, Sendable {
-        case cpu, mem, netDisk, storage, energy
+        case cpu, mem, net, disk, storage, energy
     }
 
     public enum ProcSort: String, CaseIterable, Sendable {

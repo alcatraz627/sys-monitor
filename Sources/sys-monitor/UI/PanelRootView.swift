@@ -270,18 +270,37 @@ struct PanelRootView: View {
         }
     }
 
+    /// Busiest processes for one per-process rate, name and value, biggest
+    /// first. Zero-rate processes are dropped rather than listed at 0, which
+    /// would fill the expansion with everything idle on the machine.
+    static func topConsumers(_ procs: Metric<[ProcSample]>,
+                             by value: (ProcSample) -> Double,
+                             limit: Int = 4) -> [(name: String, value: Double)] {
+        guard case .ok(let list) = procs else { return [] }
+        return list.filter { value($0) > 0 }
+            .sorted { value($0) > value($1) }
+            .prefix(limit)
+            .map { (name: $0.name, value: value($0)) }
+    }
+
     private var netDiskRow: some View {
         HStack(spacing: DesignTokens.Space.m) {
             ThroughputCell(label: "NET", metric: store.snapshot.net,
                            activity: settings.arrowActivityIndicator,
-                           history: store.snapshot.netHistory)
+                           history: store.snapshot.netHistory,
+                           section: .net,
+                           topConsumers: Self.topConsumers(store.snapshot.processes,
+                                                           by: { $0.netBps }))
             // Hide the disk cell entirely when the sampler is permanently
             // unavailable — better than showing empty values forever,
             // which reads as "broken" rather than "doesn't apply on this Mac."
             if !diskUnavailable {
                 ThroughputCell(label: "DISK", metric: store.snapshot.disk,
                                activity: settings.arrowActivityIndicator,
-                               history: store.snapshot.diskHistory)
+                               history: store.snapshot.diskHistory,
+                               section: .disk,
+                               topConsumers: Self.topConsumers(store.snapshot.processes,
+                                                               by: { $0.diskBps }))
             }
         }
     }
@@ -1263,15 +1282,29 @@ private struct ThroughputCell: View {
     let metric: Metric<Throughput>
     let activity: Bool
     let history: RingBuffer
+    /// The section this cell owns, so NET and DISK expand independently. They
+    /// share a row but not a question: one is about which process is talking,
+    /// the other about which is reading.
+    let section: SettingsStore.PanelSection
+    /// Top consumers of this cell's metric, already ranked by the caller.
+    let topConsumers: [(name: String, value: Double)]
+
+    private var expanded: Bool { settings.expandedSections.contains(section) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(label)
-                .font(DesignTokens.numericFont(size: 10, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .explain(label == "NET"
-                      ? "Network throughput across all interfaces: ↓ received · ↑ sent, per second. Sparkline = last \(Int(settings.historyWindowSeconds)) s of total activity, log-scaled."
-                      : "Disk throughput across all drives: ↓ read · ↑ written, per second. Sparkline = last \(Int(settings.historyWindowSeconds)) s of total activity, log-scaled.")
+            HStack(spacing: 3) {
+                Text(label)
+                    .font(DesignTokens.numericFont(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                SectionCaret(expanded: expanded)
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+            .onTapGesture { settings.toggleSection(section) }
+            .explain(label == "NET"
+                  ? "Network throughput across all interfaces: ↓ received · ↑ sent, per second. Sparkline = last \(Int(settings.historyWindowSeconds)) s of total activity, log-scaled. Expand for the processes behind it."
+                  : "Disk throughput across all drives: ↓ read · ↑ written, per second. Sparkline = last \(Int(settings.historyWindowSeconds)) s of total activity, log-scaled. Expand for the processes behind it.")
             HStack(spacing: DesignTokens.Space.s) {
                 HStack(spacing: 2) {
                     Text("↓")
@@ -1291,6 +1324,26 @@ private struct ThroughputCell: View {
             // holds the log-normalized fraction.
             if settings.showSparklines {
                 GraphView(buffer: history, height: 16, scaleMode: .fixed(0...1))
+            }
+            if expanded {
+                VStack(alignment: .leading, spacing: 1) {
+                    if topConsumers.isEmpty {
+                        Text("no traffic")
+                            .font(DesignTokens.numericFont(size: 9))
+                            .foregroundStyle(.tertiary)
+                    }
+                    ForEach(Array(topConsumers.enumerated()), id: \.offset) { _, c in
+                        HStack(spacing: 4) {
+                            Text(c.name).lineLimit(1).truncationMode(.middle)
+                            Spacer(minLength: 2)
+                            Text(formatBps(c.value, unit: settings.throughputUnit))
+                                .foregroundStyle(.secondary)
+                        }
+                        .font(DesignTokens.numericFont(size: 9))
+                    }
+                }
+                .padding(.top, 1)
+                .explain("The processes behind this number, busiest first. Only processes this app can see; the coverage row says how many it cannot.")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
