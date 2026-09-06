@@ -36,15 +36,23 @@ DEV_DIR=".build/dev/sys-monitor-dev.app"
 DEV_EXEC="sys-monitor-dev"
 DEV_AUTOQUIT="${SYSMON_DEV_AUTOQUIT:-600}"   # seconds; the can't-be-left-running guard
 
+# Where the app is actually launched from. Building only ./sys-monitor.app is
+# what let the installed copy sit four months stale while every build looked
+# like it had shipped: the repo copy updated, the one in ~/Applications did not,
+# and that is the one Spotlight, the Dock and launch-at-login all resolve.
+INSTALL_DIR="${HOME}/Applications/${APP_NAME}.app"
+
 CONFIG="release"
 RUN_AFTER=0
 DEV=0
 DEV_STOP=0
+INSTALL=0
 for arg in "$@"; do
     case "$arg" in
         debug)      CONFIG="debug" ;;
         release)    CONFIG="release" ;;
         --run)      RUN_AFTER=1 ;;
+        --install)  INSTALL=1 ;;
         --dev)      DEV=1 ;;
         --dev-stop) DEV_STOP=1 ;;
         *) echo "Unknown arg: $arg"; exit 2 ;;
@@ -103,6 +111,30 @@ cp -f Resources/Info.plist "${APP_DIR}/Contents/Info.plist"
 codesign --force --sign - "${APP_DIR}" >/dev/null 2>&1 || true
 
 echo "[build] OK -> ${APP_DIR}"
+
+# Warn whenever the installed copy is older than what was just built, whether or
+# not --install was passed. A silent divergence here reads as "the fix did not
+# work" and sends you back into the code.
+# Compare bytes, not timestamps. Assembling the bundle re-copies the binary on
+# every run, so an mtime test reports STALE immediately after a successful
+# install and the warning stops meaning anything.
+if [[ "${INSTALL}" -eq 0 && -x "${INSTALL_DIR}/Contents/MacOS/${EXEC_NAME}" ]]; then
+    if ! cmp -s "${APP_DIR}/Contents/MacOS/${EXEC_NAME}" "${INSTALL_DIR}/Contents/MacOS/${EXEC_NAME}"; then
+        echo "[build] STALE: ${INSTALL_DIR} differs from this build."
+        echo "[build]        That is the copy Spotlight and launch-at-login use."
+        echo "[build]        Run: ./build.sh --install"
+    fi
+fi
+
+if [[ "${INSTALL}" -eq 1 ]]; then
+    echo "[build] Installing -> ${INSTALL_DIR}"
+    pkill -f "${INSTALL_DIR}/Contents/MacOS/${EXEC_NAME}" 2>/dev/null || true
+    sleep 0.3
+    mkdir -p "$(dirname "${INSTALL_DIR}")"
+    rsync -a --delete "${APP_DIR}/" "${INSTALL_DIR}/"
+    codesign --force --sign - "${INSTALL_DIR}" >/dev/null 2>&1 || true
+    echo "[build] installed; relaunch with: open ${INSTALL_DIR}"
+fi
 
 if [[ "${RUN_AFTER}" -eq 1 ]]; then
     echo "[build] Launching ${APP_DIR}"
