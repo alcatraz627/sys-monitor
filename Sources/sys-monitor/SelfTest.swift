@@ -247,6 +247,45 @@ func runSelfTest() -> Int32 {
         check("display toggle loads stored false", dt.showSparklines == false)
     }
 
+    print("Process power segment — per-process watts")
+    do {
+        // Sub-watt is the common case, so a column that printed "0.0 W" for
+        // everything would rank rows the reader cannot tell apart.
+        check("sub-watt reads in milliwatts",
+              PanelRootView.formatWatts(0.112) == "112mW",
+              "got \(PanelRootView.formatWatts(0.112))")
+        check("a tiny draw is still distinguishable from zero",
+              PanelRootView.formatWatts(0.002) != PanelRootView.formatWatts(0),
+              "both render as \(PanelRootView.formatWatts(0))")
+        check("a watt or more reads in watts",
+              PanelRootView.formatWatts(3.5) == "3.50W",
+              "got \(PanelRootView.formatWatts(3.5))")
+
+        // The width must grow with the segment count. It was a ternary on one
+        // availability flag, which a fifth segment makes wrong (review S3).
+        let four = PanelRootView.pickerWidth(segments: 4)
+        let five = PanelRootView.pickerWidth(segments: 5)
+        check("the picker widens for a fifth segment", five > four,
+              "4 segments \(four) pt, 5 segments \(five) pt")
+        check("the picker still fits inside the 360 pt panel beside a search field",
+              five <= 200, "\(five) pt leaves nothing for the search field")
+
+        // Watts must survive the raw path, the same wiring a revert to RSS
+        // once broke silently for memory.
+        let raw = ProcRaw(pid: 9, ppid: 0, name: "p", cpuTimeNs: 0,
+                          residentBytes: 1, footprintBytes: 1, diskBytes: 0,
+                          energyNanojoules: 0)
+        check("ProcSample(raw:) carries watts through",
+              ProcSample(raw: raw, cpu: 0, diskBps: 0, netBps: 0, watts: 0.25).watts == 0.25)
+        check("watts defaults to zero rather than nil-ing the row",
+              ProcSample(raw: raw, cpu: 0, diskBps: 0, netBps: 0).watts == 0)
+
+        check("pwr is a real sort option", SettingsStore.ProcSort.allCases.contains(.pwr))
+        check("every sort option has a short segment label",
+              SettingsStore.ProcSort.allCases.allSatisfy { $0.segmentLabel.count <= 4 },
+              "a long label will not fit 31 pt")
+    }
+
     print("SettingsStore — expanded metric sections")
     do {
         let suite = "selftest.expanded.rt"
@@ -894,12 +933,14 @@ func runSelfTest() -> Int32 {
     print("Per-process memory — footprint with an RSS fallback")
     do {
         let both = ProcRaw(pid: 1, ppid: 0, name: "x", cpuTimeNs: 0,
-                           residentBytes: 900, footprintBytes: 300, diskBytes: 0)
+                           residentBytes: 900, footprintBytes: 300, diskBytes: 0,
+                           energyNanojoules: 0)
         check("footprint wins when readable", both.displayMemoryBytes == 300,
               "got \(both.displayMemoryBytes)")
         check("…and is NOT the resident size", both.displayMemoryBytes != both.residentBytes)
         let denied = ProcRaw(pid: 2, ppid: 0, name: "y", cpuTimeNs: 0,
-                             residentBytes: 900, footprintBytes: 0, diskBytes: 0)
+                             residentBytes: 900, footprintBytes: 0, diskBytes: 0,
+                             energyNanojoules: 0)
         check("RSS fallback when rusage was denied", denied.displayMemoryBytes == 900,
               "got \(denied.displayMemoryBytes)")
 
@@ -923,6 +964,13 @@ func runSelfTest() -> Int32 {
             check("footprint readable for every visible pid",
                   withFootprint == procs.count,
                   "\(withFootprint) of \(procs.count)")
+            // The power segment's whole premise: ri_energy_nj is readable
+            // without root, off the rusage call already being made.
+            let withEnergy = procs.filter { $0.energyNanojoules > 0 }.count
+            check("energy readable for nearly every visible pid",
+                  Double(withEnergy) / Double(procs.count) > 0.9,
+                  "\(withEnergy) of \(procs.count), so per-process watts would be mostly blank")
+            print("  \(withEnergy) of \(procs.count) pids report an energy counter")
             let selfPid = ProcessInfo.processInfo.processIdentifier
             if let me = procs.first(where: { $0.pid == selfPid }) {
                 // Same quantity from two APIs, sampled microseconds apart.

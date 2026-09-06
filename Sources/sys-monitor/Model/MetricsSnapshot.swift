@@ -74,27 +74,35 @@ public struct ProcSample: Sendable, Equatable {
     /// monitor. 0 when the monitor is unavailable or the pid has no
     /// tracked flows.
     public let netBps: Double
+    /// Watts attributed to this process over the sampling interval, from the
+    /// cumulative `ri_energy_nj` counter. 0 for pids whose rusage is denied,
+    /// which ranks them last in a power sort, same as disk.
+    public let watts: Double
 
     /// Build from a raw reading. This is the only path the coordinator
     /// uses, so which memory quantity reaches the UI is decided here rather
     /// than at the call site. A previous version chose it inline; reverting
     /// that one expression then re-shipped RSS with the whole suite green,
     /// because no guard covered the wiring.
-    public init(raw: ProcRaw, cpu: Double, diskBps: Double, netBps: Double) {
+    public init(raw: ProcRaw, cpu: Double, diskBps: Double, netBps: Double,
+                watts: Double = 0) {
         self.pid = raw.pid
         self.ppid = raw.ppid
         self.name = raw.name
         self.cpu = cpu
         self.memBytes = raw.displayMemoryBytes
+        self.watts = watts
         self.diskBps = diskBps
         self.netBps = netBps
     }
 
     /// Direct construction, for fixtures and tests.
     public init(pid: Int32, ppid: Int32 = 0, name: String, cpu: Double,
-                memBytes: UInt64, diskBps: Double, netBps: Double) {
+                memBytes: UInt64, diskBps: Double, netBps: Double,
+                watts: Double = 0) {
         self.pid = pid; self.ppid = ppid; self.name = name; self.cpu = cpu
         self.memBytes = memBytes; self.diskBps = diskBps; self.netBps = netBps
+        self.watts = watts
     }
 }
 

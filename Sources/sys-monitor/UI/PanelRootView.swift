@@ -411,16 +411,13 @@ struct PanelRootView: View {
                     get: { sortBy },
                     set: { setSortBy($0) }
                 )) {
-                    Text("CPU").tag(SettingsStore.ProcSort.cpu)
-                    Text("MEM").tag(SettingsStore.ProcSort.mem)
-                    Text("DISK").tag(SettingsStore.ProcSort.disk)
-                    if store.snapshot.perProcessNetAvailable {
-                        Text("NET").tag(SettingsStore.ProcSort.net)
+                    ForEach(availableSorts, id: \.self) { s in
+                        Text(s.segmentLabel).tag(s)
                     }
                 }
                 .pickerStyle(.segmented)
                 .controlSize(.mini)
-                .frame(width: store.snapshot.perProcessNetAvailable ? 156 : 124)
+                .frame(width: Self.pickerWidth(segments: availableSorts.count))
                 .explain("Rank by CPU, memory, disk, or network I/O — the third column shows the chosen metric's value")
             }
             ProcessList(
@@ -774,6 +771,32 @@ struct PanelRootView: View {
         return 0
     }
 
+    /// NET appears only when the per-process monitor is available, so the
+    /// segment count is 4 or 5 rather than fixed.
+    private var availableSorts: [SettingsStore.ProcSort] {
+        SettingsStore.ProcSort.allCases.filter {
+            $0 != .net || store.snapshot.perProcessNetAvailable
+        }
+    }
+
+    /// Watts for the process column. Most processes sit well under a watt,
+    /// so a single "0.0 W" for everything would rank rows the reader cannot
+    /// tell apart; milliwatts below 1 W keeps the column discriminating.
+    static func formatWatts(_ w: Double) -> String {
+        if w < 1 { return String(format: "%.0fmW", w * 1000) }
+        return String(format: "%.2fW", w)
+    }
+
+    /// Picker width from the number of segments, not a nested ternary.
+    ///
+    /// The width was a binary ternary on one availability flag until a fifth
+    /// segment made availability two-dimensional. 31 pt per segment is what a
+    /// five-segment control actually gets here, which is why the labels are
+    /// three and four characters rather than words.
+    static func pickerWidth(segments: Int) -> CGFloat {
+        CGFloat(max(1, segments)) * 31 + 32
+    }
+
     @ViewBuilder
     private var memoryPoolsView: some View {
         if case .ok(let s) = store.snapshot.memory {
@@ -901,6 +924,14 @@ struct PanelRootView: View {
             sorted = filtered.sorted { a, b in
                 if a.diskBps != b.diskBps { return a.diskBps > b.diskBps }
                 if a.cpu     != b.cpu     { return a.cpu     > b.cpu }
+                return a.pid < b.pid
+            }
+        case .pwr:
+            // Watts is already an interval average, so no smoothing here
+            // either. Denied pids report 0 and rank last, same as disk.
+            sorted = filtered.sorted { a, b in
+                if a.watts != b.watts { return a.watts > b.watts }
+                if a.cpu   != b.cpu   { return a.cpu   > b.cpu }
                 return a.pid < b.pid
             }
         case .net:
@@ -1320,13 +1351,14 @@ private struct ProcessList: View {
     /// parser below so the help can't drift from what's implemented —
     /// update both together.
     static let filterSyntax =
-        "Filter: name · pid digits · >5:cpu (≥5%) · <300:mem (MB) · >2:disk · >1:net (MB/s) — cpu is the default metric"
+        "Filter: name · pid digits · >5:cpu (≥5%) · <300:mem (MB) · >2:disk · >1:net (MB/s) · >1:pwr (W) — cpu is the default metric"
 
     /// Third-column value text — whatever metric the list is sorted by.
     private func thirdColumnText(_ p: ProcSample) -> String {
         switch sortBy {
         case .disk: return formatBps(p.diskBps, unit: settings.throughputUnit)
         case .net:  return formatBps(p.netBps, unit: settings.throughputUnit)
+        case .pwr:  return PanelRootView.formatWatts(p.watts)
         default:    return String(format: "%.1f%%", p.cpu * 100)
         }
     }
@@ -1355,6 +1387,8 @@ private struct ProcessList: View {
         case "net":
             let bps = value * 1_048_576
             return { op == ">" ? $0.netBps >= bps : $0.netBps <= bps }
+        case "pwr":
+            return { op == ">" ? $0.watts >= value : $0.watts <= value }
         default:
             return nil
         }

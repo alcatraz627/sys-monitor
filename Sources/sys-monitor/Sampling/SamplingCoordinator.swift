@@ -81,6 +81,7 @@ public final class SamplingCoordinator: @unchecked Sendable {
     private var prevProcCpu: [Int32: UInt64] = [:]
     private var prevProcDisk: [Int32: UInt64] = [:]
     private var prevProcNet: [Int32: UInt64] = [:]
+    private var prevProcEnergy: [Int32: UInt64] = [:]
     private var prevTickTime: TimeInterval = 0
     /// Cadence that was in force when `prevTickTime` was stamped. The gap
     /// test must judge the elapsed interval against the cadence it was
@@ -362,6 +363,7 @@ public final class SamplingCoordinator: @unchecked Sendable {
         prevProcCpu.removeAll(keepingCapacity: true)
         prevProcDisk.removeAll(keepingCapacity: true)
         prevProcNet.removeAll(keepingCapacity: true)
+        prevProcEnergy.removeAll(keepingCapacity: true)
 
         // Generous leeway on the idle tier: nothing about the glyph needs
         // sub-second precision, and the rate math divides by measured
@@ -398,6 +400,7 @@ public final class SamplingCoordinator: @unchecked Sendable {
         prevProcCpu.removeAll(keepingCapacity: true)
         prevProcDisk.removeAll(keepingCapacity: true)
         prevProcNet.removeAll(keepingCapacity: true)
+        prevProcEnergy.removeAll(keepingCapacity: true)
 
         // Per-process network counters are only worth their cost while
         // the process list is visible — start the NStat query timer with
@@ -458,6 +461,7 @@ public final class SamplingCoordinator: @unchecked Sendable {
         prevProcCpu.removeAll(keepingCapacity: true)
         prevProcDisk.removeAll(keepingCapacity: true)
         prevProcNet.removeAll(keepingCapacity: true)
+        prevProcEnergy.removeAll(keepingCapacity: true)
         prevTickTime = 0
         prevTickCadence = 0
         lastProcSampleTime = 0
@@ -726,6 +730,8 @@ public final class SamplingCoordinator: @unchecked Sendable {
             prevProcCpu.removeAll(keepingCapacity: true)
             prevProcDisk.removeAll(keepingCapacity: true)
             prevProcNet.removeAll(keepingCapacity: true)
+            prevProcEnergy.removeAll(keepingCapacity: true)
+        prevProcEnergy.removeAll(keepingCapacity: true)
             lastProcSampleTime = 0
             return .unavailable
         }
@@ -743,9 +749,11 @@ public final class SamplingCoordinator: @unchecked Sendable {
         var nextPrevCpu: [Int32: UInt64] = [:]
         var nextPrevDisk: [Int32: UInt64] = [:]
         var nextPrevNet: [Int32: UInt64] = [:]
+        var nextPrevEnergy: [Int32: UInt64] = [:]
         nextPrevCpu.reserveCapacity(raws.count)
         nextPrevDisk.reserveCapacity(raws.count)
         nextPrevNet.reserveCapacity(raws.count)
+        nextPrevEnergy.reserveCapacity(raws.count)
 
         var samples: [ProcSample] = []
         samples.reserveCapacity(raws.count)
@@ -760,6 +768,7 @@ public final class SamplingCoordinator: @unchecked Sendable {
             nextPrevDisk[raw.pid] = raw.diskBytes
             let netCumulative = netByPid[raw.pid] ?? 0
             nextPrevNet[raw.pid] = netCumulative
+            nextPrevEnergy[raw.pid] = raw.energyNanojoules
             if canCompute, let prevNs = prevProcCpu[raw.pid], raw.cpuTimeNs >= prevNs {
                 // Δns CPU-time / Δns wall-clock = fraction of one core,
                 // matching Activity Monitor's convention (can exceed 1.0
@@ -773,14 +782,22 @@ public final class SamplingCoordinator: @unchecked Sendable {
                 if let prevNet = prevProcNet[raw.pid], netCumulative >= prevNet {
                     netBps = Double(netCumulative - prevNet) / elapsed
                 }
+                // Nanojoules over seconds is watts. Same wrap rule as the
+                // byte counters: a backwards reading means the process was
+                // replaced under its pid, so report 0 rather than a spike.
+                var watts = 0.0
+                if let prevE = prevProcEnergy[raw.pid], raw.energyNanojoules >= prevE {
+                    watts = Double(raw.energyNanojoules - prevE) / 1_000_000_000 / elapsed
+                }
                 samples.append(ProcSample(
-                    raw: raw, cpu: cpu, diskBps: diskBps, netBps: netBps
+                    raw: raw, cpu: cpu, diskBps: diskBps, netBps: netBps, watts: watts
                 ))
             }
         }
         prevProcCpu = nextPrevCpu
         prevProcDisk = nextPrevDisk
         prevProcNet = nextPrevNet
+        prevProcEnergy = nextPrevEnergy
 
         if !canCompute { return .measuring }
         return .ok(samples)

@@ -118,6 +118,11 @@ public struct ProcRaw: Sendable {
     /// so nothing can be calibrated from one to the other.
     public let footprintBytes: UInt64
     public let diskBytes: UInt64
+    /// Lifetime energy attributed to this process, in nanojoules, from
+    /// `ri_energy_nj` on the rusage call the sampler already makes. Cumulative
+    /// like the disk counter, so watts is a delta over elapsed. Zero when
+    /// rusage was denied, which ranks the process last in a power sort.
+    public let energyNanojoules: UInt64
 
     /// The memory figure to display: footprint when it was readable, else
     /// RSS. Kept here rather than at the call site so every consumer makes

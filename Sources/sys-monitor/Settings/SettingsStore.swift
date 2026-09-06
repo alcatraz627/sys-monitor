@@ -34,13 +34,26 @@ public final class SettingsStore: ObservableObject {
     }
 
     public enum ProcSort: String, CaseIterable, Sendable {
-        case cpu, mem, disk, net
+        case cpu, mem, disk, net, pwr
         public var displayName: String {
             switch self {
             case .cpu:  return "CPU"
             case .mem:  return "Memory"
             case .disk: return "Disk I/O"
             case .net:  return "Network I/O"
+            case .pwr:  return "Power"
+            }
+        }
+
+        /// The segment label. Short because the picker is 156 pt wide, not the
+        /// panel's 360: five segments is about 31 pt each.
+        public var segmentLabel: String {
+            switch self {
+            case .cpu:  return "CPU"
+            case .mem:  return "MEM"
+            case .disk: return "DISK"
+            case .net:  return "NET"
+            case .pwr:  return "PWR"
             }
         }
     }

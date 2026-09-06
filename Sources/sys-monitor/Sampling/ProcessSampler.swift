@@ -113,6 +113,10 @@ public struct ProcessSampler: Sampler {
             // Same call, same struct, one more field. Footprint is what
             // Activity Monitor shows; RSS below is only the fallback.
             let footprintBytes = gotUsage ? usage.ri_phys_footprint : 0
+            // Third field off the same call. Measured live at 0.112 W for a
+            // node process over a 5.01 s interval, readable for every visible
+            // pid without root.
+            let energyNj = gotUsage ? usage.ri_energy_nj : 0
 
             result.append(ProcRaw(
                 pid: pid,
@@ -121,7 +125,8 @@ public struct ProcessSampler: Sampler {
                 cpuTimeNs: cpuTimeNs,
                 residentBytes: info.pti_resident_size,
                 footprintBytes: footprintBytes,
-                diskBytes: diskBytes
+                diskBytes: diskBytes,
+                energyNanojoules: energyNj
             ))
         }
         return result
