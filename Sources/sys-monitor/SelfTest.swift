@@ -840,6 +840,32 @@ func runSelfTest() -> Int32 {
         check("pool wired and compressed pass through",
               pooled.wiredBytes == 10 * page && pooled.compressedBytes == 5 * page)
 
+        // The subtitle is the only thing that says why the MEM colour fired.
+        // Text only: the owner's constraint is that no second visual signifier
+        // joins the existing ramp.
+        check("no reading yet says so, rather than reading as calm",
+              PanelRootView.reclaimPhrase(nil) == "settling",
+              "got \(PanelRootView.reclaimPhrase(nil))")
+        check("a quiet machine says so out loud",
+              PanelRootView.reclaimPhrase(ReclaimRate(stallPagesPerSec: 0, evictPagesPerSec: 0))
+                  == "no reclaim")
+        check("a measurable rate is quantified",
+              PanelRootView.reclaimPhrase(ReclaimRate(stallPagesPerSec: 640, evictPagesPerSec: 0))
+                  == "reclaiming 10.0 MB/s",
+              "got \(PanelRootView.reclaimPhrase(ReclaimRate(stallPagesPerSec: 640, evictPagesPerSec: 0)))")
+        check("a trickle is not rounded away to 0.0 MB/s",
+              PanelRootView.reclaimPhrase(ReclaimRate(stallPagesPerSec: 1, evictPagesPerSec: 0))
+                  == "reclaiming a trickle",
+              "got \(PanelRootView.reclaimPhrase(ReclaimRate(stallPagesPerSec: 1, evictPagesPerSec: 0)))")
+        check("no reading and no reclaim read differently",
+              PanelRootView.reclaimPhrase(nil)
+                  != PanelRootView.reclaimPhrase(ReclaimRate(stallPagesPerSec: 0, evictPagesPerSec: 0)),
+              "an unmeasured machine and a calm one must not look the same")
+        check("eviction alone does not claim the machine is reclaiming",
+              PanelRootView.reclaimPhrase(ReclaimRate(stallPagesPerSec: 0, evictPagesPerSec: 9999))
+                  == "no reclaim",
+              "compressing pages costs nobody time; faulting them back does")
+
         // Cumulative page counters wrap the same way byte counters do.
         check("page rate over a normal delta",
               RateMath.pagesPerSec(prev: 100, now: 300, elapsed: 2) == 100)

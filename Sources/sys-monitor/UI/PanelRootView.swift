@@ -204,6 +204,11 @@ struct PanelRootView: View {
             HStack(spacing: DesignTokens.Space.m) {
                 Text("swap \(swapText)")
                     .explain("Swap space in use — sustained growth means RAM is oversubscribed")
+                // Text only, no dot and no second bar: the colour on the value
+                // above is the only visual signifier memory gets. This says
+                // WHY that colour fired, which the percentage cannot.
+                Text(memReclaimText)
+                    .explain("What the machine is doing to find memory. Pages faulted back out of the compressor or in from swap are the ones that cost you time.")
                 Spacer()
                 HStack(spacing: 4) {
                     Text("pressure").foregroundStyle(.secondary)
@@ -777,6 +782,24 @@ struct PanelRootView: View {
         SettingsStore.ProcSort.allCases.filter {
             $0 != .net || store.snapshot.perProcessNetAvailable
         }
+    }
+
+    private var memReclaimText: String {
+        guard case .ok(let s) = store.snapshot.memory else { return "" }
+        return Self.reclaimPhrase(s.reclaim)
+    }
+
+    /// What the machine is doing to find memory, in words.
+    ///
+    /// The calm phrase is deliberate rather than an empty string. Blank reads
+    /// as "not measured", and this line is the only place that says why the
+    /// MEM colour did or did not fire.
+    static func reclaimPhrase(_ r: ReclaimRate?, pageSize: Double = 16384) -> String {
+        guard let r else { return "settling" }
+        if r.stallPagesPerSec <= 0 { return "no reclaim" }
+        let mbPerSec = r.stallPagesPerSec * pageSize / 1_048_576
+        if mbPerSec < 0.1 { return "reclaiming a trickle" }
+        return String(format: "reclaiming %.1f MB/s", mbPerSec)
     }
 
     /// Watts for the process column. Most processes sit well under a watt,
