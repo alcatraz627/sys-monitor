@@ -4,7 +4,10 @@ Plan of record for the next build session. Ruled with the owner 2026-09-06 again
 mocks at `.claude/output/20260906-panel-mocks/mocks.html` and the research under
 `.claude/output/20260906-monitor-capabilities/`.
 
-Status: reviewed 2026-09-06, not started. The adversarial review is at
+Status: reviewed 2026-09-06, partly built. Done: severity on the memory side,
+expand and collapse with the memory pools view, and the power segment. Not done:
+CPU severity, and expansion for the CPU and NET sections. See "Still open" at the
+end for what is waiting on a ruling. The adversarial review is at
 `.claude/output/20260906-panel-v3-review/review.md` and it did not pass the plan as
 written. Findings S3 through S9 are folded into the sections below. Three sections stay
 open on an owner ruling and are marked UNDER REVIEW where they sit: severity (§3, the
@@ -57,8 +60,10 @@ demand.
 > UNCITED (review S6). That 110 pt appears nowhere else in the repo, and the only other
 > 110 pt is `SettingsStore.swift:25-27`, which measures menu-bar glyph width on a
 > different axis. Since this figure is the whole argument for expand and collapse,
-> measure it against a render before relying on it. The cluster-averaged compromise from mock D is therefore dropped: it
-solved a problem that expansion solves better.
+> measure it against a render before relying on it.
+
+The cluster-averaged compromise from mock D is therefore dropped: it solved a
+problem that expansion solves better.
 
 Persist the expanded set in `SettingsStore` so the panel reopens as the user left it.
 
@@ -86,7 +91,12 @@ the only encoding tested that makes a parked cluster read as a block. Measured o
 machine the two Performance groups differ 1.3% against 22.5% mean, so the aggregate
 genuinely hides structure.
 
-### Memory expanded
+### Memory expanded  ·  POOLS BUILT 2026-09-06 (`3f143a8`)
+
+The five pools ship, as a composition bar plus the figures, behind the MEM
+caret. GPU memory is not built yet. The band sources are fixed in code and
+pinned by the suite, and the live bands sum to 64549 MB of 65536 MB, the
+remainder being the speculative pages `trulyFreeBytes` excludes by design.
 
 The owner asked whether this device has multiple types of memory. Physically no:
 `hw.packages: 1`, one unified 64 GiB pool, no NUMA and no per-DIMM breakdown on Apple
@@ -182,7 +192,14 @@ plan should say so in the UI wording rather than overclaim.
 after this change, its trigger is describing the machine's normal condition and must be
 re-baselined. This is an acceptance criterion, not a preference.
 
-## 4. Power as a fifth segment
+## 4. Power as a fifth segment  ·  BUILT 2026-09-06 (`df0d0ec`)
+
+Built as specified. The width question below was answered by making the frame a
+function of segment count, `PanelRootView.pickerWidth(segments:)`, which is what
+review S3 said it had to become. Labels are abbreviations because 31 pt per
+segment is what five segments actually get. Live check: 561 of 561 visible pids
+report `ri_energy_nj` without root, asserted in the suite rather than assumed.
+
 
 - Add `pwr` to `SettingsStore.ProcSort` (`SettingsStore.swift:29`, today
   `case cpu, mem, disk, net`) and a fifth segment to the picker at `:406`.
