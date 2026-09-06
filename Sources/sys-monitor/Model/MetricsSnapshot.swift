@@ -19,6 +19,10 @@ public struct MetricsSnapshot: Sendable, Equatable {
     public var loadAverage: LoadAverage? = nil     // load + uptime; panel-tier only
     public var perInterfaceNet: [InterfaceThroughput] = []  // NET breakdown; panel-tier
     public var cpuHistory: RingBuffer
+    /// One history per core, for the expanded heatmap. Empty in the idle
+    /// tier, which never reads per-core counters, and empty on the first open
+    /// tick before a delta exists.
+    public var perCoreHistory: [RingBuffer] = []
     public var memHistory: RingBuffer
     public var netHistory: RingBuffer
     public var diskHistory: RingBuffer

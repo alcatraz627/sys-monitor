@@ -44,6 +44,27 @@ public enum DesignTokens {
         }
     }
 
+    /// Heatmap cell colour for one core's load. Opacity within the CPU
+    /// identity hue, so a parked cluster reads as a pale block and a saturated
+    /// one as a solid band, without borrowing another metric's colour.
+    public static func cpuHeat(_ load: Double) -> Color {
+        Color.orange.opacity(cpuHeatOpacity(load))
+    }
+
+    /// The opacity behind `cpuHeat`, separated so it can be asserted on.
+    ///
+    /// A guard comparing two `Color` values cannot see this: `Color.orange`
+    /// at zero opacity is a different value from `Color.clear` while
+    /// rendering identically, so the comparison passes whatever the opacity
+    /// is. The number is the only readable thing here.
+    ///
+    /// Floors at 0.06 so an idle core draws a visible row. An invisible row
+    /// and a core missing from the map look the same, and only one is a bug.
+    public static func cpuHeatOpacity(_ load: Double) -> Double {
+        let clamped = min(1, max(0, load))
+        return 0.06 + clamped * 0.84
+    }
+
     /// The same three colours, for a metric whose severity is decided from
     /// evidence rather than from a fraction crossing a threshold. Memory uses
     /// this: percent used still fills the bar, but reclaim activity picks the

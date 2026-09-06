@@ -160,7 +160,10 @@ struct PanelRootView: View {
                             warn: settings.severityThresholds.cpuWarn,
                             critical: settings.severityThresholds.cpuCritical)
                         : Color.primary)
+                SectionCaret(expanded: settings.expandedSections.contains(.cpu))
             }
+            .contentShape(Rectangle())
+            .onTapGesture { settings.toggleSection(.cpu) }
             // Sparkline carries "now + recent"; the per-core strip carries
             // distribution. The overall bar was a third encoding of "now"
             // and ate vertical real estate for no extra signal.
@@ -169,6 +172,10 @@ struct PanelRootView: View {
             }
             if settings.showPerCoreStrip {
                 CoreStrip(loads: cpuPerCore)
+            }
+            if settings.expandedSections.contains(.cpu) {
+                CoreHeatmap(histories: store.snapshot.perCoreHistory,
+                            clusters: Self.clusters)
             }
         }
     }
@@ -795,6 +802,36 @@ struct PanelRootView: View {
         Self.pickerSorts(perProcessNet: store.snapshot.perProcessNetAvailable)
     }
 
+    /// The machine's performance clusters, name and core count, from
+    /// `hw.perflevelN.*`. Read once: the topology cannot change at runtime.
+    ///
+    /// The names come from the hardware rather than a constant, because they
+    /// are not the P and E everyone assumes. This machine reports "Super" with
+    /// 6 and "Performance" with 12, which a hardcoded label would have got
+    /// backwards as well as wrong.
+    static let clusters: [(name: String, cores: Int)] = {
+        func sysctlInt(_ name: String) -> Int? {
+            var value: Int = 0
+            var size = MemoryLayout<Int>.size
+            guard sysctlbyname(name, &value, &size, nil, 0) == 0 else { return nil }
+            return value
+        }
+        func sysctlString(_ name: String) -> String? {
+            var size = 0
+            guard sysctlbyname(name, nil, &size, nil, 0) == 0, size > 0 else { return nil }
+            var buf = [CChar](repeating: 0, count: size)
+            guard sysctlbyname(name, &buf, &size, nil, 0) == 0 else { return nil }
+            return String(cString: buf)
+        }
+        guard let levels = sysctlInt("hw.nperflevels"), levels > 0 else { return [] }
+        var out: [(String, Int)] = []
+        for i in 0..<levels {
+            guard let n = sysctlInt("hw.perflevel\(i).logicalcpu"), n > 0 else { continue }
+            out.append((sysctlString("hw.perflevel\(i).name") ?? "cluster \(i)", n))
+        }
+        return out
+    }()
+
     /// Which sorts the segmented control offers. NET appears only when the
     /// per-process monitor is available, so this is 4 or 5 entries.
     static func pickerSorts(perProcessNet: Bool) -> [SettingsStore.ProcSort] {
@@ -1023,6 +1060,74 @@ private struct UsageBar: View {
 
 /// The disclosure caret on a metric section header. Same idiom as the process
 /// rows: the whole header is the tap target, because a 10 pt caret is not one.
+/// Which core, over the window. The collapsed sparkline is aggregate shape
+/// over time and the strip is distribution now; neither shows a cluster parked
+/// while another saturates, which is the thing an aggregate hides.
+///
+/// One row per core, gapless, with a break between clusters. Cluster sizes
+/// come from `hw.perflevel*` rather than a constant, because a hardcoded split
+/// is wrong on every Mac but this one.
+private struct CoreHeatmap: View {
+    let histories: [RingBuffer]
+    let clusters: [(name: String, cores: Int)]
+
+    /// Rows grouped by cluster, so the break lands where the hardware says.
+    /// A trailing group catches any core the topology did not account for,
+    /// because losing a row silently is worse than an unlabelled one.
+    private var groups: [(name: String, rows: [RingBuffer])] {
+        var out: [(String, [RingBuffer])] = []
+        var i = 0
+        for c in clusters where i < histories.count {
+            let end = min(i + c.cores, histories.count)
+            out.append((c.name, Array(histories[i..<end])))
+            i = end
+        }
+        if i < histories.count { out.append(("other", Array(histories[i...]))) }
+        return out
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            ForEach(Array(groups.enumerated()), id: \.offset) { _, g in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(g.name.lowercased()) · \(g.rows.count)")
+                        .font(DesignTokens.numericFont(size: 9))
+                        .foregroundStyle(.tertiary)
+                    VStack(spacing: 0) {
+                        ForEach(Array(g.rows.enumerated()), id: \.offset) { _, h in
+                            CoreHeatRow(history: h)
+                        }
+                    }
+                }
+            }
+        }
+        .explain("One row per core over the history window, grouped by the machine's own performance clusters. A cluster sitting idle while another saturates reads as a block here and is invisible in the aggregate.")
+    }
+}
+
+/// One core's history as a row of cells. Opacity within the CPU identity hue,
+/// never a second metric's colour.
+private struct CoreHeatRow: View {
+    let history: RingBuffer
+
+    var body: some View {
+        GeometryReader { geo in
+            let pts = history.points
+            let n = max(pts.count, 1)
+            let w = geo.size.width / CGFloat(n)
+            HStack(spacing: 0) {
+                ForEach(Array(pts.enumerated()), id: \.offset) { _, p in
+                    Rectangle()
+                        .fill(DesignTokens.cpuHeat(p.value))
+                        .frame(width: w)
+                }
+                if pts.isEmpty { Rectangle().fill(Color.primary.opacity(0.04)) }
+            }
+        }
+        .frame(height: 5)
+    }
+}
+
 /// Shipped frame below five segments, intrinsic width at five.
 private struct PickerWidth: ViewModifier {
     let segments: Int

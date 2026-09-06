@@ -129,6 +129,10 @@ public final class SamplingCoordinator: @unchecked Sendable {
 
     private var generation: UInt64 = 0
     private var cpuHistory = RingBuffer(windowSeconds: 60)
+    /// Sized on the first per-core reading rather than at init: the core count
+    /// is a runtime fact, and a hardcoded 18 would silently truncate on any
+    /// other Mac.
+    private var perCoreHistory: [RingBuffer] = []
     private var memHistory = RingBuffer(windowSeconds: 60)
     // Throughput history is stored as a log-normalized 0…1 fraction (the
     // same curve the glyph's activity arrows use) so a plain fixed-scale
@@ -175,6 +179,9 @@ public final class SamplingCoordinator: @unchecked Sendable {
             guard let self else { return }
             let now = monoSeconds()
             self.cpuHistory.setWindow(seconds, now: now)
+            for i in self.perCoreHistory.indices {
+                self.perCoreHistory[i].setWindow(seconds, now: now)
+            }
             self.memHistory.setWindow(seconds, now: now)
             self.netHistory.setWindow(seconds, now: now)
             self.diskHistory.setWindow(seconds, now: now)
@@ -596,6 +603,14 @@ public final class SamplingCoordinator: @unchecked Sendable {
         let perCore: [Double]
         if let pp = prevPerCore, pp.count == counters.perCore.count {
             perCore = RateMath.cpuPerCore(prev: pp, now: counters.perCore)
+            if perCoreHistory.count != perCore.count {
+                perCoreHistory = (0..<perCore.count).map { _ in
+                    RingBuffer(windowSeconds: cpuHistory.windowSeconds)
+                }
+            }
+            for (i, v) in perCore.enumerated() {
+                perCoreHistory[i].append(HistoryPoint(timestamp: now, value: v))
+            }
         } else {
             perCore = []  // first open tick — show the strip empty until the next tick
         }
@@ -841,6 +856,7 @@ public final class SamplingCoordinator: @unchecked Sendable {
             loadAverage: loadAverage,
             perInterfaceNet: perInterfaceNet,
             cpuHistory: cpuHistory,
+            perCoreHistory: perCoreHistory,
             memHistory: memHistory,
             netHistory: netHistory,
             diskHistory: diskHistory,

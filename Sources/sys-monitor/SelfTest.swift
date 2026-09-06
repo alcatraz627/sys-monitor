@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import SwiftUI
 
 // Boundary-check harness, run via `sys-monitor --self-test` (exits 0 if all
 // pass, 1 otherwise). This is the project's regression suite for the math
@@ -299,6 +300,41 @@ func runSelfTest() -> Int32 {
         check("every sort option has a short segment label",
               SettingsStore.ProcSort.allCases.allSatisfy { $0.segmentLabel.count <= 4 },
               "a long label will not fit 31 pt")
+    }
+
+    print("CPU expanded — per-core heatmap")
+    do {
+        // The topology is read, never assumed. A hardcoded P/E split would be
+        // wrong on this machine, which reports "Super" and "Performance".
+        let cl = PanelRootView.clusters
+        check("the machine reports at least one performance cluster", !cl.isEmpty)
+        let total = cl.reduce(0) { $0 + $1.cores }
+        check("cluster core counts add up to the machine's cores",
+              total == ProcessInfo.processInfo.activeProcessorCount,
+              "clusters sum to \(total), machine has \(ProcessInfo.processInfo.activeProcessorCount)")
+        check("every cluster carries a name from the hardware",
+              cl.allSatisfy { !$0.name.isEmpty && !$0.name.hasPrefix("cluster ") },
+              "got \(cl.map(\.name))")
+        print("  clusters: \(cl.map { "\($0.name) x\($0.cores)" }.joined(separator: ", "))")
+
+        // An idle core must still draw. A zero-opacity row and a core that is
+        // missing from the map look identical, and only one of them is a bug.
+        // Asserted on the opacity, not on the Color: orange-at-zero-opacity
+        // and Color.clear are different values that render the same, so a
+        // Color comparison passes no matter what the opacity is. That guard
+        // was written first and survived a mutation that made every idle core
+        // invisible.
+        check("an idle core is still visible", DesignTokens.cpuHeatOpacity(0) >= 0.05,
+              "got \(DesignTokens.cpuHeatOpacity(0)), an idle core would render as a gap")
+        check("heat rises with load",
+              DesignTokens.cpuHeatOpacity(0) < DesignTokens.cpuHeatOpacity(0.5)
+                  && DesignTokens.cpuHeatOpacity(0.5) < DesignTokens.cpuHeatOpacity(1.0))
+        check("a saturated core is near solid", DesignTokens.cpuHeatOpacity(1) >= 0.85,
+              "got \(DesignTokens.cpuHeatOpacity(1))")
+        check("out-of-range load clamps rather than over-saturating",
+              DesignTokens.cpuHeatOpacity(2.0) == DesignTokens.cpuHeatOpacity(1.0))
+        check("a negative load clamps to the idle end",
+              DesignTokens.cpuHeatOpacity(-1) == DesignTokens.cpuHeatOpacity(0))
     }
 
     print("SettingsStore — expanded metric sections")

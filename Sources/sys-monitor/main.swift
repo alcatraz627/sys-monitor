@@ -236,6 +236,25 @@ MainActor.assumeIsolated {
             s.disk = .ok(Throughput(inPerSec: 361_472, outPerSec: 12_582_912))
             s.diskSpace = DiskSpaceSample(freeBytes: 210 * 1_073_741_824,
                                           totalBytes: 994 * 1_073_741_824)
+            // A parked cluster beside a saturated one: the exact structure an
+            // aggregate hides, and the only reason the heatmap exists.
+            var hist: [RingBuffer] = []
+            for core in 0..<18 {
+                var rb = RingBuffer(windowSeconds: 60)
+                for t in 0..<60 {
+                    // Slow drift plus small noise, which is what a core's load
+                    // actually looks like. The first fixture alternated on both
+                    // axes and rendered as a checkerboard, exercising a shape
+                    // no real machine produces.
+                    let base: Double = core < 6 ? 0.06 : 0.72
+                    let drift = sin((Double(t) / 9.0) + Double(core) * 0.4) * 0.12
+                    let noise = Double((core * 7 + t * 3) % 5) / 100.0
+                    rb.append(HistoryPoint(timestamp: Double(t),
+                                           value: min(1, max(0, base + drift + noise))))
+                }
+                hist.append(rb)
+            }
+            s.perCoreHistory = hist
             s.processes = .ok(procs(10))
             s.perProcessNetAvailable = true
             s.loadAverage = LoadAverage(one: 3.1, five: 2.8, fifteen: 2.4,
@@ -261,6 +280,9 @@ MainActor.assumeIsolated {
         cases.append(PanelCase(name: "mem-thrashing",
                                snap: snapshot(reclaim: busy, severity: .warn, pressure: .normal),
                                expanded: [.mem], sort: .cpu))
+        cases.append(PanelCase(name: "cpu-expanded",
+                               snap: snapshot(reclaim: calm, severity: .normal, pressure: .normal),
+                               expanded: [.cpu], sort: .cpu))
         cases.append(PanelCase(name: "power-sort",
                                snap: snapshot(reclaim: calm, severity: .normal, pressure: .normal),
                                expanded: [], sort: .pwr))
