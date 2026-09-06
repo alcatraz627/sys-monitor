@@ -302,6 +302,61 @@ func runSelfTest() -> Int32 {
               "a long label will not fit 31 pt")
     }
 
+    print("CPU severity — utilisation gates, run queue decides")
+    do {
+        func sev(_ util: Double, _ q: Double?) -> MetricSeverity {
+            RateMath.cpuSeverity(utilisation: util, runQueuePerCore: q)
+        }
+        // The plan's own two cases, which motivated the whole change.
+        check("94% busy with a queue of 2.1 on 18 cores stays calm",
+              sev(0.94, 2.1 / 18) == .normal,
+              "a machine doing exactly what it was asked must not read alarming")
+        check("91% busy with a queue of 37 on 18 cores does not",
+              sev(0.91, 37.0 / 18) == .critical,
+              "got \(sev(0.91, 37.0 / 18))")
+
+        // The gate is what fixes the decay. getloadavg still read 0.80x cores
+        // a full minute after the load stopped; utilisation collapses in one
+        // tick, so the colour clears with it.
+        check("an idle machine is calm even while the 1-minute average is high",
+              sev(0.04, 1.9) == .normal,
+              "this is the steady-state amber the plan calls a bug")
+        check("…and that is the gate doing it, not the queue",
+              sev(0.99, 1.9) != .normal,
+              "the same queue above the gate must still fire")
+
+        check("no load reading makes no claim", sev(0.99, nil) == .normal,
+              "falling back to utilisation here restores the trigger this replaces")
+        check("utilisation alone never fires", sev(1.0, 0.1) == .normal,
+              "a fully busy but unqueued machine is the case that must stay calm")
+        check("queue crossing one core deep warns", sev(0.95, 1.2) == .warn)
+
+        // The glyph must reach the same verdict as the panel. Memory had this
+        // guard and CPU did not, so a mutation putting the glyph back on
+        // utilisation passed silently.
+        let cores = Double(ProcessInfo.processInfo.activeProcessorCount)
+        func cpuSnap(loadOne: Double) -> MetricsSnapshot {
+            var s = MetricsSnapshot.initial()
+            s.cpu = .ok(CPUSample(overall: 0.95, perCore: []))
+            s.loadAverage = LoadAverage(one: loadOne, five: loadOne, fifteen: loadOne,
+                                        uptimeSeconds: 1)
+            return s
+        }
+        let calmQueue = cpuSnap(loadOne: 0.2 * cores)
+        let deepQueue = cpuSnap(loadOne: 3.0 * cores)
+        let cpuGlyph = GlyphRenderer(cells: [.cpu])
+        check("glyph CPU colour follows the queue, at an identical percentage",
+              cpuGlyph.renderKey(snapshot: calmQueue) != cpuGlyph.renderKey(snapshot: deepQueue),
+              "both keys are \(cpuGlyph.renderKey(snapshot: calmQueue)), so the glyph still decides on utilisation")
+        func withoutSeverity(_ k: String) -> String {
+            k.split(separator: "|").dropLast().joined(separator: "|")
+        }
+        check("…and the percent-driven half is identical in that pair",
+              withoutSeverity(cpuGlyph.renderKey(snapshot: calmQueue))
+                  == withoutSeverity(cpuGlyph.renderKey(snapshot: deepQueue)),
+              "the fixture varies utilisation too, so it cannot detect a revert")
+    }
+
     print("CPU expanded — per-core heatmap")
     do {
         // The topology is read, never assumed. A hardcoded P/E split would be
@@ -827,7 +882,7 @@ func runSelfTest() -> Int32 {
     // fault-back is already abnormal.
     print("Memory severity — reclaim evidence, not percent used")
     do {
-        func sev(_ pressure: MemoryPressure, stall: Double, evict: Double = 0) -> MemorySeverity {
+        func sev(_ pressure: MemoryPressure, stall: Double, evict: Double = 0) -> MetricSeverity {
             RateMath.memorySeverity(
                 pressure: pressure,
                 reclaim: ReclaimRate(stallPagesPerSec: stall, evictPagesPerSec: evict))

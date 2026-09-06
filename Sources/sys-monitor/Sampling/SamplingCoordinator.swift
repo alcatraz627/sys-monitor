@@ -521,7 +521,13 @@ public final class SamplingCoordinator: @unchecked Sendable {
             net: netMetric,
             disk: diskMetric,
             power: .measuring,
-            battery: batterySampler.read()
+            battery: batterySampler.read(),
+            // Read in the idle tier too, not because the footer needs it (the
+            // panel is shut) but because the glyph's CPU colour now keys on it.
+            // Leaving it panel-only would make the menu bar and the panel
+            // disagree about the same metric, which is the defect the memory
+            // colour hit an hour earlier. Two cheap syscalls per tick.
+            loadAverage: loadSampler.read()
         )
     }
 
@@ -568,7 +574,7 @@ public final class SamplingCoordinator: @unchecked Sendable {
             // Panel-tier facts — only read while the panel is open, since
             // nothing renders them otherwise.
             diskSpace: diskSpaceSampler.read(),
-            loadAverage: loadSampler.read(),
+            loadAverage: loadSampler.read(),   // also read in idle, see below
             perInterfaceNet: lastPerInterfaceNet
         )
     }

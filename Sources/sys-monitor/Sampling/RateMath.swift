@@ -133,8 +133,8 @@ public enum RateMath {
     public static func memorySeverity(pressure: MemoryPressure,
                                       reclaim: ReclaimRate?,
                                       warnPagesPerSec: Double = 50,
-                                      criticalPagesPerSec: Double = 1000) -> MemorySeverity {
-        let fromKernel: MemorySeverity
+                                      criticalPagesPerSec: Double = 1000) -> MetricSeverity {
+        let fromKernel: MetricSeverity
         switch pressure {
         case .normal:   fromKernel = .normal
         case .warn:     fromKernel = .warn
@@ -142,13 +142,53 @@ public enum RateMath {
         }
         guard let reclaim else { return fromKernel }
 
-        let fromRate: MemorySeverity
+        let fromRate: MetricSeverity
         switch reclaim.stallPagesPerSec {
         case ..<warnPagesPerSec:     fromRate = .normal
         case ..<criticalPagesPerSec: fromRate = .warn
         default:                     fromRate = .critical
         }
         return max(fromKernel, fromRate)
+    }
+
+    /// What the CPU colour keys on: utilisation gates, run queue decides.
+    ///
+    /// Neither signal works alone, and both failures are measured. Utilisation
+    /// alone is today's bug, since a machine at 94% doing exactly what it was
+    /// asked reads as alarming. Run queue alone is worse: `getloadavg` on
+    /// Darwin is a 1-minute average that took 21 s to cross the saturation line
+    /// under a 2x step and still read 0.80x cores a full minute after the load
+    /// stopped, so it would sit amber on an idle machine.
+    ///
+    /// The gate fixes the second failure exactly. When the machine goes quiet
+    /// utilisation collapses within one tick, so the colour clears immediately
+    /// whatever the 1-minute average still says. What it does not fix is the
+    /// rise: a stall shorter than the averaging window never moves the queue,
+    /// so a brief hitch still reads calm. Confirming a transient needs an
+    /// instantaneous instrument, and the only one measured to work costs about
+    /// 10% of a core continuously, which a monitor should not spend.
+    ///
+    /// Mach's PROCESSOR_SET_LOAD_INFO was tried as an alternative source.
+    /// `processor_set_statistics` segfaults on the unprivileged name port, so
+    /// it is not an option for this app at all.
+    ///
+    /// The thresholds are the plan's own two cases. A queue of 2.1 on 18 cores
+    /// at 94% utilisation is 0.12 per core and stays calm; 37 on 18 cores at
+    /// 91% is 2.06 per core and goes critical.
+    public static func cpuSeverity(utilisation: Double,
+                                   runQueuePerCore: Double?,
+                                   gate: Double = 0.85,
+                                   warnQueue: Double = 1.0,
+                                   criticalQueue: Double = 2.0) -> MetricSeverity {
+        // No reading means no claim. Falling back to utilisation here would
+        // quietly restore the trigger this replaces.
+        guard let q = runQueuePerCore else { return .normal }
+        guard utilisation >= gate else { return .normal }
+        switch q {
+        case ..<warnQueue:     return .normal
+        case ..<criticalQueue: return .warn
+        default:               return .critical
+        }
     }
 
     /// Whether the interval since the last tick is too long to delta across —

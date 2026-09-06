@@ -155,11 +155,9 @@ struct PanelRootView: View {
                 // same thresholds the bars use.
                 Text(cpuValueText)
                     .font(DesignTokens.numericFont(size: 12, weight: .medium))
-                    .foregroundStyle(cpuLoad >= settings.severityThresholds.cpuWarn
-                        ? DesignTokens.loadColor(cpuLoad,
-                            warn: settings.severityThresholds.cpuWarn,
-                            critical: settings.severityThresholds.cpuCritical)
-                        : Color.primary)
+                    .foregroundStyle(cpuSeverity == .normal
+                        ? Color.primary
+                        : DesignTokens.severityColor(cpuSeverity))
                 SectionCaret(expanded: settings.expandedSections.contains(.cpu))
             }
             .contentShape(Rectangle())
@@ -898,10 +896,26 @@ struct PanelRootView: View {
         }
     }
 
+    /// What colours the CPU row. Utilisation still fills the bar and prints
+    /// the number; it stopped deciding the colour on 2026-09-06, because a
+    /// machine at 94% doing what it was asked read as alarming.
+    private var cpuSeverity: MetricSeverity {
+        RateMath.cpuSeverity(utilisation: cpuLoad,
+                             runQueuePerCore: Self.runQueuePerCore(store.snapshot))
+    }
+
+    /// Run queue relative to core count, or nil when there is no reading.
+    static func runQueuePerCore(_ s: MetricsSnapshot) -> Double? {
+        guard let l = s.loadAverage else { return nil }
+        let cores = Double(ProcessInfo.processInfo.activeProcessorCount)
+        guard cores > 0 else { return nil }
+        return l.one / cores
+    }
+
     /// What colours the MEM row. Percent used still fills the bar and prints
     /// the number; it stopped deciding the colour on 2026-09-06, because 71%
     /// while thrashing read calm and 90% with no reclaim read alarming.
-    private var memSeverity: MemorySeverity {
+    private var memSeverity: MetricSeverity {
         if case .ok(let s) = store.snapshot.memory { return s.severity }
         return .normal
     }

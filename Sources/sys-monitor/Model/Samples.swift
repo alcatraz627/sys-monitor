@@ -30,7 +30,7 @@ public struct MemorySample: Sendable, Equatable {
     /// What the MEM colour keys on. Deliberately separate from
     /// `usedBytes / totalBytes`, which stays the bar fill and the number: a
     /// machine can sit at 71% and thrash, or at 90% and be perfectly calm.
-    public let severity: MemorySeverity
+    public let severity: MetricSeverity
     /// Nil until two samples exist, so a rate can be computed.
     public let reclaim: ReclaimRate?
     /// The pools the used total is made of. Carried as values rather than
@@ -63,7 +63,7 @@ public struct MemoryPools: Sendable, Equatable {
 /// Three levels, matching the existing green / amber / red ramp. Comparable so
 /// that combining two independent signals is `max`, which is the whole policy:
 /// any signal may raise severity and none may lower another's.
-public enum MemorySeverity: Sendable, Equatable, Comparable {
+public enum MetricSeverity: Sendable, Equatable, Comparable {
     case normal, warn, critical
 }
 

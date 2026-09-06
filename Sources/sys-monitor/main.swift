@@ -218,7 +218,7 @@ MainActor.assumeIsolated {
             return out
         }
 
-        func snapshot(reclaim: ReclaimRate?, severity: MemorySeverity,
+        func snapshot(reclaim: ReclaimRate?, severity: MetricSeverity,
                       pressure: MemoryPressure) -> MetricsSnapshot {
             var s = MetricsSnapshot.initial()
             s.cpu = .ok(CPUSample(overall: 0.34,

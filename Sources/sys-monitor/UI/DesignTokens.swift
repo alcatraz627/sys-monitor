@@ -69,7 +69,7 @@ public enum DesignTokens {
     /// evidence rather than from a fraction crossing a threshold. Memory uses
     /// this: percent used still fills the bar, but reclaim activity picks the
     /// colour.
-    public static func severityColor(_ s: MemorySeverity) -> Color {
+    public static func severityColor(_ s: MetricSeverity) -> Color {
         switch s {
         case .normal:   return .green
         case .warn:     return .orange
