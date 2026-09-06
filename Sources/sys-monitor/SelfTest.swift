@@ -270,20 +270,21 @@ func runSelfTest() -> Int32 {
               PanelRootView.pickerWidth(segments: 4) == 156,
               "got \(PanelRootView.pickerWidth(segments: 4))")
 
-        // PWR is deliberately absent from the control. Rendered 2026-09-06, a
-        // five-segment segmented picker overflows this header at every frame
-        // width and label length tried, so the segment waits on a layout
-        // ruling while the sort itself works.
-        check("the control offers four segments when per-process net is up",
-              PanelRootView.pickerSorts(perProcessNet: true).count == 4,
+        // Five segments with per-process network up, four without. The fifth
+        // is the reason the picker takes its intrinsic width there: a fixed
+        // frame wider than the space left draws past the panel edge instead
+        // of shrinking, which clipped PWR at 187, 170, 153 and 140 pt alike.
+        check("the control offers five segments when per-process net is up",
+              PanelRootView.pickerSorts(perProcessNet: true).count == 5,
               "got \(PanelRootView.pickerSorts(perProcessNet: true))")
-        check("and three when it is not",
-              PanelRootView.pickerSorts(perProcessNet: false).count == 3,
+        check("and four when it is not",
+              PanelRootView.pickerSorts(perProcessNet: false).count == 4,
               "got \(PanelRootView.pickerSorts(perProcessNet: false))")
-        check("PWR is withheld from the control pending the layout ruling",
-              !PanelRootView.pickerSorts(perProcessNet: true).contains(.pwr))
-        check("…while remaining a real sort the rest of the code honours",
-              SettingsStore.ProcSort.allCases.contains(.pwr))
+        check("PWR reaches the control in both cases",
+              PanelRootView.pickerSorts(perProcessNet: true).contains(.pwr)
+                  && PanelRootView.pickerSorts(perProcessNet: false).contains(.pwr))
+        check("NET is the one that drops out, not PWR",
+              !PanelRootView.pickerSorts(perProcessNet: false).contains(.net))
 
         // Watts must survive the raw path, the same wiring a revert to RSS
         // once broke silently for memory.

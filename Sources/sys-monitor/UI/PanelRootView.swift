@@ -410,6 +410,11 @@ struct PanelRootView: View {
                 Text("PROCESSES")
                     .font(DesignTokens.numericFont(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
+                    // Never the element that gives way. Left flexible it wraps
+                    // to "PROCESSE / S" once a fifth segment tightens the row;
+                    // the filter box is the one thing here that shrinks
+                    // gracefully, so it does the absorbing.
+                    .fixedSize()
                 Spacer()
                 searchField
                 Picker("", selection: Binding(
@@ -422,7 +427,13 @@ struct PanelRootView: View {
                 }
                 .pickerStyle(.segmented)
                 .controlSize(.mini)
-                .frame(width: Self.pickerWidth(segments: availableSorts.count))
+                // A fixed frame wider than the space left does not shrink the
+                // control, it draws past the panel edge, which is how five
+                // segments clipped at 187, 170, 153 and 140 pt alike. Below
+                // five the shipped frame is kept exactly; at five the control
+                // takes its intrinsic width and the flexible filter box gives
+                // up the difference.
+                .modifier(PickerWidth(segments: availableSorts.count))
                 .explain("Rank by CPU, memory, disk, or network I/O — the third column shows the chosen metric's value")
             }
             ProcessList(
@@ -468,7 +479,11 @@ struct PanelRootView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
-            TextField("filter", text: $searchText)
+            // "find" rather than "filter": the box is the element that gives
+            // way when a fifth sort segment tightens the row, and six
+            // characters clipped to "filte". The magnifying glass beside it
+            // already says what the box is for.
+            TextField("find", text: $searchText)
                 .textFieldStyle(.plain)
                 .font(DesignTokens.numericFont(size: 11))
                 .frame(maxWidth: 80)
@@ -780,22 +795,11 @@ struct PanelRootView: View {
         Self.pickerSorts(perProcessNet: store.snapshot.perProcessNetAvailable)
     }
 
-    /// Which sorts the segmented control offers.
-    ///
-    /// NET appears only when the per-process monitor is available. PWR is
-    /// withheld from the control, and that is a measurement rather than a
-    /// preference: rendered on 2026-09-06, a five-segment segmented picker
-    /// overflows this header inside 360 pt at every frame width and label
-    /// length tried, because the control enforces an intrinsic minimum from
-    /// its labels and the row already carries the PROCESSES label and the
-    /// filter box. Making it fit means shortening the header, moving the
-    /// control to its own row, or dropping a segment, each of which changes a
-    /// layout the owner asked to keep. The watts, the ranking and the filter
-    /// all work; only the segment waits on that ruling.
+    /// Which sorts the segmented control offers. NET appears only when the
+    /// per-process monitor is available, so this is 4 or 5 entries.
     static func pickerSorts(perProcessNet: Bool) -> [SettingsStore.ProcSort] {
         SettingsStore.ProcSort.allCases.filter { s in
-            if s == .pwr { return false }
-            return s != .net || perProcessNet
+            s != .net || perProcessNet
         }
     }
 
@@ -1019,6 +1023,19 @@ private struct UsageBar: View {
 
 /// The disclosure caret on a metric section header. Same idiom as the process
 /// rows: the whole header is the tap target, because a 10 pt caret is not one.
+/// Shipped frame below five segments, intrinsic width at five.
+private struct PickerWidth: ViewModifier {
+    let segments: Int
+
+    func body(content: Content) -> some View {
+        if segments >= 5 {
+            content.fixedSize()
+        } else {
+            content.frame(width: PanelRootView.pickerWidth(segments: segments))
+        }
+    }
+}
+
 private struct SectionCaret: View {
     let expanded: Bool
 
