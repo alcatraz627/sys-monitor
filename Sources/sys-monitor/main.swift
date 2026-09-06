@@ -154,7 +154,8 @@ MainActor.assumeIsolated {
         snap.cpu = .ok(CPUSample(overall: 0.26, perCore: []))
         snap.memory = .ok(MemorySample(usedBytes: 32 << 30, totalBytes: 64 << 30,
                                        swapUsedBytes: 0, pressure: .normal,
-                                       severity: .normal, reclaim: nil))
+                                       severity: .normal, reclaim: nil,
+                                       pools: MemoryPools(appBytes: 0, wiredBytes: 0, compressedBytes: 0, cachedFilesBytes: 0, freeBytes: 0)))
         snap.net = .ok(Throughput(inPerSec: 1_572_864, outPerSec: 138_240))
         snap.disk = .ok(Throughput(inPerSec: 361_472, outPerSec: 12_582_912))
 

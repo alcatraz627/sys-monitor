@@ -185,7 +185,10 @@ struct PanelRootView: View {
                     .foregroundStyle(memSeverity == .normal
                         ? Color.primary
                         : DesignTokens.severityColor(memSeverity))
+                SectionCaret(expanded: settings.expandedSections.contains(.mem))
             }
+            .contentShape(Rectangle())
+            .onTapGesture { settings.toggleSection(.mem) }
             // Auto-scale because memory sits in a narrow band; minSpan
             // keeps the trace from amplifying single-percent jitter.
             // Range labels because auto-scale renders a 2% wobble with
@@ -194,6 +197,9 @@ struct PanelRootView: View {
                 GraphView(buffer: store.snapshot.memHistory,
                           scaleMode: .auto(minSpan: 0.05),
                           showRangeLabels: true)
+            }
+            if settings.expandedSections.contains(.mem) {
+                memoryPoolsView
             }
             HStack(spacing: DesignTokens.Space.m) {
                 Text("swap \(swapText)")
@@ -768,6 +774,13 @@ struct PanelRootView: View {
         return 0
     }
 
+    @ViewBuilder
+    private var memoryPoolsView: some View {
+        if case .ok(let s) = store.snapshot.memory {
+            MemoryPoolsView(pools: s.pools, format: formatBytes)
+        }
+    }
+
     /// What colours the MEM row. Percent used still fills the bar and prints
     /// the number; it stopped deciding the colour on 2026-09-06, because 71%
     /// while thrashing read calm and 90% with no reclaim read alarming.
@@ -936,6 +949,80 @@ private struct UsageBar: View {
             }
         }
         .frame(height: height)
+    }
+}
+
+/// The disclosure caret on a metric section header. Same idiom as the process
+/// rows: the whole header is the tap target, because a 10 pt caret is not one.
+private struct SectionCaret: View {
+    let expanded: Bool
+
+    var body: some View {
+        Image(systemName: "chevron.right")
+            .font(.system(size: 9, weight: .medium))
+            .foregroundStyle(.tertiary)
+            .rotationEffect(.degrees(expanded ? 90 : 0))
+            .frame(width: 10)
+    }
+}
+
+/// Where the machine's memory actually is, one bar plus the numbers.
+///
+/// Apple Silicon has one physical pool, so these are competing claims on the
+/// same unified memory rather than separate banks. Stacking hides everything
+/// but the first band from comparison against a flat baseline, which is why
+/// app memory sits leftmost and every band prints its own figure.
+private struct MemoryPoolsView: View {
+    let pools: MemoryPools
+    let format: (Double) -> String
+
+    private var bands: [(String, UInt64, Double)] {
+        [("app",        pools.appBytes,          1.00),
+         ("wired",      pools.wiredBytes,        0.75),
+         ("compressed", pools.compressedBytes,   0.50),
+         ("cached",     pools.cachedFilesBytes,  0.28),
+         ("free",       pools.freeBytes,         0.12)]
+    }
+
+    private var total: Double {
+        let t = bands.reduce(0.0) { $0 + Double($1.1) }
+        return t > 0 ? t : 1
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            GeometryReader { geo in
+                HStack(spacing: 1) {
+                    ForEach(bands, id: \.0) { name, bytes, opacity in
+                        Rectangle()
+                            .fill(Color.teal.opacity(opacity))
+                            .frame(width: max(0, geo.size.width * Double(bytes) / total))
+                            .accessibilityLabel(name)
+                    }
+                }
+            }
+            .frame(height: 8)
+            .clipShape(RoundedRectangle(cornerRadius: 2))
+
+            // Two columns so five bands do not run the panel tall. Numbers
+            // rather than area comparison, per the stacking caveat above.
+            let cols = [GridItem(.flexible(), alignment: .leading),
+                        GridItem(.flexible(), alignment: .leading)]
+            LazyVGrid(columns: cols, alignment: .leading, spacing: 2) {
+                ForEach(bands, id: \.0) { name, bytes, opacity in
+                    HStack(spacing: 4) {
+                        RoundedRectangle(cornerRadius: 1)
+                            .fill(Color.teal.opacity(opacity))
+                            .frame(width: 6, height: 6)
+                        Text(name).foregroundStyle(.secondary)
+                        Text(format(Double(bytes)))
+                    }
+                }
+            }
+            .font(DesignTokens.numericFont(size: 10))
+        }
+        .padding(.top, 1)
+        .explain("Where memory is right now: app, wired, compressed, cached files, free. One unified pool on Apple Silicon, so these compete for the same RAM.")
     }
 }
 

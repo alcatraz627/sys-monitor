@@ -26,6 +26,13 @@ public final class SettingsStore: ObservableObject {
     /// 110 pt.
     public static let defaultNarrowBarCells: [BarCell] = [.cpu, .mem]
 
+    /// A metric section the user can expand for detail. Raw values are the
+    /// persisted identity, so renaming a case silently forgets that section's
+    /// state; add cases, do not rename them.
+    public enum PanelSection: String, CaseIterable, Sendable {
+        case cpu, mem, netDisk, storage, energy
+    }
+
     public enum ProcSort: String, CaseIterable, Sendable {
         case cpu, mem, disk, net
         public var displayName: String {
@@ -60,6 +67,7 @@ public final class SettingsStore: ObservableObject {
     private static let kMemWarn  = "sevMemWarn"
     private static let kMemCrit  = "sevMemCritical"
     private static let kPinnedPids = "pinnedPids"
+    private static let kExpanded   = "expandedSections"
     private static let kHistoryWindow = "historyWindowSeconds"
     private static let kCompactGlyph = "compactGlyph"
     private static let kGroupProcs = "groupProcesses"
@@ -186,6 +194,15 @@ public final class SettingsStore: ObservableObject {
     /// by pid. Pinned rows sort above everything else and are never cut by
     /// the row-count cap. A pinned pid that exits just stops appearing.
     /// Persisted as a sorted Int array.
+    /// Which metric sections are showing their detail view. Collapsed is the
+    /// default and the state the panel ships in, so an empty set is correct
+    /// rather than uninitialised.
+    @Published public var expandedSections: Set<PanelSection> {
+        didSet {
+            defaults.set(expandedSections.map(\.rawValue).sorted(), forKey: Self.kExpanded)
+        }
+    }
+
     @Published public var pinnedPids: Set<Int32> {
         didSet { defaults.set(pinnedPids.sorted().map(Int.init), forKey: Self.kPinnedPids) }
     }
@@ -269,6 +286,10 @@ public final class SettingsStore: ObservableObject {
         self.showCoverageRow  = (defaults.object(forKey: Self.kCoverage) as? Bool) ?? true
         let storedPins = (defaults.object(forKey: Self.kPinnedPids) as? [Int]) ?? []
         self.pinnedPids = Set(storedPins.map(Int32.init))
+        // An unknown raw value is dropped rather than defaulted, so a section
+        // removed in a later build cannot resurrect itself as a phantom.
+        let storedExpanded = (defaults.object(forKey: Self.kExpanded) as? [String]) ?? []
+        self.expandedSections = Set(storedExpanded.compactMap(PanelSection.init(rawValue:)))
         let ad = AlertConfig.defaults
         self.alertConfig = AlertConfig(
             enabled:         (defaults.object(forKey: Self.kAlertsOn) as? Bool) ?? ad.enabled,
@@ -329,6 +350,7 @@ public final class SettingsStore: ObservableObject {
         severityThresholds = .defaults
         alertConfig = .defaults
         pinnedPids = []
+        expandedSections = []
         historyWindowSeconds = 60
         compactGlyph = false
         groupProcesses = false
@@ -343,6 +365,11 @@ public final class SettingsStore: ObservableObject {
     public func togglePin(_ pid: Int32) {
         if pinnedPids.contains(pid) { pinnedPids.remove(pid) }
         else { pinnedPids.insert(pid) }
+    }
+
+    public func toggleSection(_ s: PanelSection) {
+        if expandedSections.contains(s) { expandedSections.remove(s) }
+        else { expandedSections.insert(s) }
     }
 
     /// Nudge a cell one slot toward the front (`up`) or back of the bar.

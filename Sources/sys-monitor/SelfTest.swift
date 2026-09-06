@@ -247,6 +247,40 @@ func runSelfTest() -> Int32 {
         check("display toggle loads stored false", dt.showSparklines == false)
     }
 
+    print("SettingsStore — expanded metric sections")
+    do {
+        let suite = "selftest.expanded.rt"
+        let d = UserDefaults(suiteName: suite)!
+        d.removePersistentDomain(forName: suite)
+        let s = SettingsStore(defaults: d)
+        check("every section starts collapsed", s.expandedSections.isEmpty,
+              "collapsed is the state the panel ships in, so empty is correct")
+        s.toggleSection(.mem)
+        check("toggleSection expands", s.expandedSections == [.mem], "got \(s.expandedSections)")
+        s.toggleSection(.cpu)
+        s.toggleSection(.mem)
+        check("toggleSection collapses on the second call",
+              s.expandedSections == [.cpu], "got \(s.expandedSections)")
+        let reloaded = SettingsStore(defaults: d)
+        check("expansion round-trips through defaults",
+              reloaded.expandedSections == [.cpu], "got \(reloaded.expandedSections)")
+        // A section removed in a later build must not come back as a phantom.
+        // The junk sits beside .mem, never beside .cpu: a first version of
+        // this paired it with .cpu, and a mutation that defaulted junk to .cpu
+        // produced the same set, so the guard could not fail.
+        d.set(["mem", "notASection"], forKey: "expandedSections")
+        let withJunk = SettingsStore(defaults: d)
+        check("an unknown stored section is dropped, not defaulted",
+              withJunk.expandedSections == [.mem], "got \(withJunk.expandedSections)")
+        d.set(["notASection"], forKey: "expandedSections")
+        check("junk alone leaves everything collapsed",
+              SettingsStore(defaults: d).expandedSections.isEmpty,
+              "got \(SettingsStore(defaults: d).expandedSections)")
+        withJunk.resetToDefaults()
+        check("reset collapses everything", withJunk.expandedSections.isEmpty,
+              "got \(withJunk.expandedSections)")
+    }
+
     print("SettingsStore — pinned pids (8.1)")
     do {
         let suite = "selftest.pins.rt"
@@ -583,7 +617,8 @@ func runSelfTest() -> Int32 {
             s.memory = .ok(MemorySample(usedBytes: UInt64(frac * 64_000_000_000),
                                         totalBytes: 64_000_000_000,
                                         swapUsedBytes: 0, pressure: .normal,
-                                        severity: .normal, reclaim: nil))
+                                        severity: .normal, reclaim: nil,
+                                       pools: MemoryPools(appBytes: 0, wiredBytes: 0, compressedBytes: 0, cachedFilesBytes: 0, freeBytes: 0)))
             s.net = .ok(Throughput(inPerSec: inBps, outPerSec: outBps))
             s.disk = .ok(Throughput(inPerSec: outBps, outPerSec: inBps))
             return s
@@ -748,6 +783,24 @@ func runSelfTest() -> Int32 {
               glyph.renderKey(snapshot: thrashing).contains("critical"),
               "got \(glyph.renderKey(snapshot: thrashing))")
 
+        // Pools are carried on the sample rather than recomputed in the view,
+        // so this pins the wiring. The formulas themselves are pinned by the
+        // "System memory formula" section below.
+        let poolRaw = MemoryRaw(
+            activeBytes: 0, wiredBytes: 10 * page, compressedBytes: 5 * page,
+            freeBytes: 20 * page, inactiveBytes: 0,
+            internalBytes: 140 * page, externalBytes: 60 * page, purgeableBytes: 10 * page,
+            speculativeBytes: 8 * page, physicalTotalBytes: 200 * page, swapUsedBytes: 0,
+            compressions: 0, decompressions: 0, swapins: 0, swapouts: 0)
+        let pooled = poolRaw.toSample(pressure: .normal, reclaim: nil).pools
+        check("pool app is the app-memory formula, not internal",
+              pooled.appBytes == poolRaw.appBytes && pooled.appBytes == 130 * page,
+              "got \(pooled.appBytes / page) pages")
+        check("pool cached is external + purgeable", pooled.cachedFilesBytes == 70 * page)
+        check("pool free excludes speculative", pooled.freeBytes == 12 * page)
+        check("pool wired and compressed pass through",
+              pooled.wiredBytes == 10 * page && pooled.compressedBytes == 5 * page)
+
         // Cumulative page counters wrap the same way byte counters do.
         check("page rate over a normal delta",
               RateMath.pagesPerSec(prev: 100, now: 300, elapsed: 2) == 100)
@@ -820,6 +873,17 @@ func runSelfTest() -> Int32 {
             check("live app memory ≤ live used", m.appBytes <= m.usedBytes)
             check("live used ≤ physical total", m.usedBytes <= m.physicalTotalBytes,
                   "used \(m.usedBytes / 1_048_576) MB of \(m.physicalTotalBytes / 1_048_576) MB")
+            // The expanded breakdown draws these five as one composition, so
+            // they must be disjoint claims on real RAM. A synthetic fixture
+            // cannot test this: the app-memory fixture spends the whole
+            // physical total on internal+external by design.
+            let p = m.toSample(pressure: .normal, reclaim: nil).pools
+            let bandSum = p.appBytes + p.wiredBytes + p.compressedBytes
+                + p.cachedFilesBytes + p.freeBytes
+            check("the five pool bands do not sum past real RAM",
+                  bandSum <= m.physicalTotalBytes,
+                  "bands \(bandSum / 1_048_576) MB of \(m.physicalTotalBytes / 1_048_576) MB, so a band double-counts")
+            print("  live pools sum = \(bandSum / 1_048_576) MB of \(m.physicalTotalBytes / 1_048_576) MB")
             print("  live used = \(m.usedBytes / 1_048_576) MB, cached files = \(m.cachedFilesBytes / 1_048_576) MB")
         } else {
             print("  (MemorySampler unavailable here — skipping live identity)")

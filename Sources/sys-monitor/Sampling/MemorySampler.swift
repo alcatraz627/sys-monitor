@@ -117,7 +117,12 @@ public extension MemoryRaw {
             swapUsedBytes: swapUsedBytes,
             pressure: pressure,
             severity: RateMath.memorySeverity(pressure: pressure, reclaim: reclaim),
-            reclaim: reclaim
+            reclaim: reclaim,
+            pools: MemoryPools(appBytes: appBytes,
+                               wiredBytes: wiredBytes,
+                               compressedBytes: compressedBytes,
+                               cachedFilesBytes: cachedFilesBytes,
+                               freeBytes: trulyFreeBytes)
         )
     }
 }

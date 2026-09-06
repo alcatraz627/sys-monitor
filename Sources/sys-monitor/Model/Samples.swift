@@ -33,6 +33,31 @@ public struct MemorySample: Sendable, Equatable {
     public let severity: MemorySeverity
     /// Nil until two samples exist, so a rate can be computed.
     public let reclaim: ReclaimRate?
+    /// The pools the used total is made of. Carried as values rather than
+    /// recomputed in the view, because each one is a formula the suite pins
+    /// (app is internal minus purgeable, free excludes speculative), and a
+    /// second implementation in the UI is a second place to get it wrong.
+    public let pools: MemoryPools
+}
+
+/// Where the machine's memory actually is. On Apple Silicon there is one
+/// physical pool, so these are claims on the same unified memory rather than
+/// separate banks.
+public struct MemoryPools: Sendable, Equatable {
+    public let appBytes: UInt64
+    public let wiredBytes: UInt64
+    public let compressedBytes: UInt64
+    public let cachedFilesBytes: UInt64
+    public let freeBytes: UInt64
+
+    public init(appBytes: UInt64, wiredBytes: UInt64, compressedBytes: UInt64,
+                cachedFilesBytes: UInt64, freeBytes: UInt64) {
+        self.appBytes = appBytes
+        self.wiredBytes = wiredBytes
+        self.compressedBytes = compressedBytes
+        self.cachedFilesBytes = cachedFilesBytes
+        self.freeBytes = freeBytes
+    }
 }
 
 /// Three levels, matching the existing green / amber / red ramp. Comparable so
