@@ -91,20 +91,14 @@ struct SettingsView: View {
             }
 
             Section("Severity thresholds") {
-                Text("Load levels where CPU and memory turn orange (warn) then red (critical) — in the glyph and the panel.")
+                Text("CPU busy gate: below this, CPU never turns orange or red whatever the run queue does. Above it, the queue decides.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                thresholdSlider("CPU warn",        value: $settings.severityThresholds.cpuWarn)
-                thresholdSlider("CPU critical",     value: $settings.severityThresholds.cpuCritical)
-                thresholdSlider("Memory warn",      value: $settings.severityThresholds.memWarn)
-                thresholdSlider("Memory critical",  value: $settings.severityThresholds.memCritical)
-                if settings.severityThresholds.cpuWarn >= settings.severityThresholds.cpuCritical
-                    || settings.severityThresholds.memWarn >= settings.severityThresholds.memCritical {
-                    Label("Warn should sit below critical, or the orange band disappears",
-                          systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.orange)
-                        .font(.caption)
-                }
+                thresholdSlider("CPU busy gate", value: $settings.severityThresholds.cpuWarn)
+                thresholdSlider("Per-core critical", value: $settings.severityThresholds.cpuCritical)
+                Text("Memory has no threshold to set. Its colour comes from reclaim — pages faulted back out of the compressor or in from swap — because a machine can sit at 90% and be perfectly calm, or at 71% and be thrashing. Alert thresholds are separate, below.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Alerts") {

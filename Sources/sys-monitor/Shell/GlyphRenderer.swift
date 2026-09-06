@@ -191,7 +191,7 @@ public struct GlyphRenderer {
             switch cell {
             case .cpu:
                 let load = Self.cpuLoad(snapshot)
-                let sev = Self.cpuSeverityCell(snapshot)
+                let sev = Self.cpuSeverityCell(snapshot, warn: thresholds.cpuWarn)
                 parts.append("c\(state(snapshot.cpu))\(Self.cpuPercentText(snapshot))|\(Int(load * 32))|\(sev)")
             case .mem:
                 let load = Self.memLoad(snapshot)
@@ -320,7 +320,7 @@ public struct GlyphRenderer {
                 symbol: "cpu",
                 load: Self.cpuLoad(snapshot),
                 valueText: Self.cpuPercentText(snapshot),
-                severity: Self.cpuSeverityCell(snapshot),
+                severity: Self.cpuSeverityCell(snapshot, warn: thresholds.cpuWarn),
                 identityColor: identity, in: rect
             )
         case .mem:
@@ -552,9 +552,10 @@ public struct GlyphRenderer {
 
     /// CPU's colour comes from the same two-signal decision the panel makes,
     /// so the menu bar and the panel cannot disagree about the same metric.
-    fileprivate static func cpuSeverityCell(_ s: MetricsSnapshot) -> Severity {
+    fileprivate static func cpuSeverityCell(_ s: MetricsSnapshot, warn: Double) -> Severity {
         switch RateMath.cpuSeverity(utilisation: cpuLoad(s),
-                                    runQueuePerCore: PanelRootView.runQueuePerCore(s)) {
+                                    runQueuePerCore: PanelRootView.runQueuePerCore(s),
+                                    gate: warn) {
         case .normal:   return .normal
         case .warn:     return .warn
         case .critical: return .critical

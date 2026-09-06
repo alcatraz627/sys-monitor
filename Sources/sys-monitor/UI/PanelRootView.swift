@@ -282,7 +282,9 @@ struct PanelRootView: View {
     }
 
     private var netDiskRow: some View {
-        HStack(spacing: DesignTokens.Space.m) {
+        // .top, not the default centre: expanding one cell would otherwise
+        // re-centre the other and slide its header down the screen.
+        HStack(alignment: .top, spacing: DesignTokens.Space.m) {
             ThroughputCell(label: "NET", metric: store.snapshot.net,
                            activity: settings.arrowActivityIndicator,
                            history: store.snapshot.netHistory,
@@ -458,7 +460,7 @@ struct PanelRootView: View {
                 // takes its intrinsic width and the flexible filter box gives
                 // up the difference.
                 .modifier(PickerWidth(segments: availableSorts.count))
-                .explain("Rank by CPU, memory, disk, or network I/O — the third column shows the chosen metric's value")
+                .explain("Rank by CPU, memory, disk, network I/O, or power — the third column shows the chosen metric's value")
             }
             ProcessList(
                 metric: store.snapshot.processes,
@@ -901,7 +903,8 @@ struct PanelRootView: View {
     /// machine at 94% doing what it was asked read as alarming.
     private var cpuSeverity: MetricSeverity {
         RateMath.cpuSeverity(utilisation: cpuLoad,
-                             runQueuePerCore: Self.runQueuePerCore(store.snapshot))
+                             runQueuePerCore: Self.runQueuePerCore(store.snapshot),
+                             gate: settings.severityThresholds.cpuWarn)
     }
 
     /// Run queue relative to core count, or nil when there is no reading.

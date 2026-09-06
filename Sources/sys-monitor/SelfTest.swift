@@ -331,6 +331,16 @@ func runSelfTest() -> Int32 {
               "a fully busy but unqueued machine is the case that must stay calm")
         check("queue crossing one core deep warns", sev(0.95, 1.2) == .warn)
 
+        // The gate is the user's own cpuWarn. It went hardcoded at 0.85 for
+        // one commit, which silently stopped a tuned threshold from applying
+        // to anything the user could see.
+        check("a lower gate lets an earlier queue fire",
+              RateMath.cpuSeverity(utilisation: 0.6, runQueuePerCore: 1.5, gate: 0.5) == .warn,
+              "a user who set the gate to 0.5 must see it honoured")
+        check("…and the shipped gate would have stayed calm there",
+              RateMath.cpuSeverity(utilisation: 0.6, runQueuePerCore: 1.5, gate: 0.85) == .normal,
+              "the pair cannot detect a hardcoded gate if both gates agree")
+
         // The glyph must reach the same verdict as the panel. Memory had this
         // guard and CPU did not, so a mutation putting the glyph back on
         // utilisation passed silently.

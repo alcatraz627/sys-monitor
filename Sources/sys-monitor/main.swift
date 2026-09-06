@@ -286,6 +286,11 @@ MainActor.assumeIsolated {
         cases.append(PanelCase(name: "netdisk-expanded",
                                snap: snapshot(reclaim: calm, severity: .normal, pressure: .normal),
                                expanded: [.net, .disk], sort: .cpu))
+        // Only NET expanded: the asymmetric case. With the row's default centre
+        // alignment, growing one cell slid the other's header down the screen.
+        cases.append(PanelCase(name: "net-only-expanded",
+                               snap: snapshot(reclaim: calm, severity: .normal, pressure: .normal),
+                               expanded: [.net], sort: .cpu))
         cases.append(PanelCase(name: "power-sort",
                                snap: snapshot(reclaim: calm, severity: .normal, pressure: .normal),
                                expanded: [], sort: .pwr))
