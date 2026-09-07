@@ -1198,14 +1198,12 @@ private struct SectionCaret: View {
     }
 }
 
-/// A metric section's header row. Owns three things every section needs and
-/// none of them got consistently: the caret sits first, so the eye finds the
-/// same control in the same place in all four; the row shades under the
-/// pointer, because nothing else said the header was clickable; and the whole
-/// row is the hit target, since a 10 pt caret is not one.
+/// A metric section's header row: one hover shade, one hit target, one caret
+/// position for all four sections.
 ///
-/// The shade is painted by a background inset outward rather than by padding,
-/// so adopting this moved no pixel of the existing layout.
+/// The caret trails. Leading it was tried and reverted: nothing else in the
+/// panel is indented, so a leading caret pushed CPU, MEM, NET and DISK right
+/// of STORAGE, PROCESSES and every sparkline, giving the panel two left edges.
 private struct SectionHeader<Content: View>: View {
     let expanded: Bool
     let onTap: () -> Void
@@ -1215,8 +1213,8 @@ private struct SectionHeader<Content: View>: View {
 
     var body: some View {
         HStack(spacing: DesignTokens.Space.s) {
-            SectionCaret(expanded: expanded)
             content
+            SectionCaret(expanded: expanded)
         }
         .background(
             RoundedRectangle(cornerRadius: 4)

@@ -133,10 +133,11 @@ All four expandable sections use one `SectionHeader`
 
 | Property | Value | Why |
 |---|---|---|
-| Caret position | Leading, before the label, in all four | The eye finds one control in one place. Before this was shared, CPU and MEM put it far right and NET and DISK put it after the label. |
+| Caret position | Trailing, at the right edge of its own section, in all four | One rule, one position. Before this was shared, CPU and MEM put it far right and NET and DISK put it just after the label. A leading caret was tried and reverted: nothing else in the panel is indented, so it gave CPU, MEM, NET and DISK a different left edge from STORAGE, PROCESSES and every sparkline. |
+| Icon left of a title | None, in all four | Owner instruction, verbatim: "no icon left of the CPU / MEM / NET / DISK titles". |
 | Hit target | The whole row | A 10 pt caret is not a hit target. |
 | Hover | Row shades to `Color.primary.opacity(0.07)`, 12 ms ease | Nothing else said the header was clickable. |
-| Layout impact | None | The shade is a background inset outward, not padding, so adopting it moved no pixel. |
+| Layout impact | The shade alone moves nothing | The shade is a background inset outward, not padding. The caret's own position is a layout choice and is covered by the row above. |
 | Expanded state | Persisted per section in `SettingsStore` | The panel reopens as you left it. |
 
 ### 4.2 CPU
@@ -210,7 +211,7 @@ and a scrolling list.
 | Click outside, Esc, Space switch | Closes, unless pinned |
 | Pin | Holds the panel open against all three |
 | Drag bottom edge | Resizes height, 320 to 900 pt, persisted. Width is locked at 360. |
-| Double click anywhere | Nothing. `.resizable` is in the style mask for the height drag and brings AppKit's zoom with it, which re-framed the panel against its min and max and dropped it in the screen centre. `DropPanel.zoom` is overridden to a no-op. |
+| Double click anywhere | BROKEN. Intended: nothing. Actual: the panel re-frames against its min and max and lands in the screen centre. `DropPanel.zoom` is overridden to a no-op, which did not stop it, so the mechanism is not `zoom(_:)` and is currently unidentified. See divergence 9. |
 | Global hotkey | Opt-Cmd-M |
 | Right-click the glyph | A menu headed by the current top consumer |
 | Copy button | The whole current reading as text to the pasteboard |
@@ -311,6 +312,12 @@ Listed so a reviewer can go past them rather than rediscover them.
    with `try?` and prints unconditionally, and nothing creates the target directory. This
    matters to a reviewer because it is the tool most likely to be used as evidence about
    the surfaces above.
+9. **Double click re-frames the panel, and the mechanism is unknown.** Section 4.7. The
+   first fix assumed AppKit's zoom and overrode `DropPanel.zoom`; the defect survived, so
+   that assumption was wrong. `AppleActionOnDoubleClick` is unset, meaning it defaults to
+   Zoom, and `PanelController` only ever calls `setFrameOrigin`, never a sizing `setFrame`,
+   so the resize originates in AppKit by some path that is not `zoom(_:)`. An instrumented
+   build logging `setFrame` with a stack trace is the open probe.
 
 ## 9. How to check any of this
 
