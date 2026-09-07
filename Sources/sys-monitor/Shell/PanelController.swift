@@ -166,19 +166,14 @@ final class PanelController {
         panel.hasShadow = true
 
         let root = PanelRootView(
-            onShowSettings: { [weak self] in self?.onShowSettings?() }
+            onShowSettings: { [weak self] in self?.onShowSettings?() },
+            onResizeDrag: { [weak self] dy in self?.resize(byDragging: dy) },
+            onResizeEnd: { [weak self] in self?.commitDraggedHeight() }
         )
         .environmentObject(store)
         .environmentObject(settings)
         .environmentObject(panelState)
-        // The panel's height belongs to the user's drag, not to the content.
-        // By default NSHostingController pushes the SwiftUI content's size
-        // extrema onto the window, and `updateWindowContentSizeExtremaIfNecessary`
-        // then calls setFrame: expanding a section walked the window 531 -> 555
-        // -> 574 -> 707 against a stored height of 609 (probe trace, 2026-09-07).
-        let host = NSHostingController(rootView: root)
-        host.sizingOptions = []
-        panel.contentViewController = host
+        panel.contentViewController = NSHostingController(rootView: root)
         panel.onCancel = { [weak self] in
             guard let self, !self.isPinned else { return }
             self.close()
@@ -188,19 +183,37 @@ final class PanelController {
         // edges once .resizable is in the style mask); width stays
         // locked to the design's 360 via min == max. The chosen height
         // persists through settings.
-        panel.styleMask.insert(.resizable)
+        // `.resizable` is deliberately NOT set. It was there for the height
+        // drag and it brought AppKit's zoom with it. The grip in the panel's
+        // own footer does the drag now, on a 12 pt target.
         panel.minSize = NSSize(width: 360, height: 320)
         panel.maxSize = NSSize(width: 360, height: 900)
-        resizeObserver = NotificationCenter.default.addObserver(
-            forName: NSWindow.didEndLiveResizeNotification,
-            object: panel, queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                guard let self, let p = self.panel else { return }
-                self.settings.panelHeight = Double(p.frame.height)
-            }
-        }
+
         return panel
+    }
+
+    // MARK: - Height drag
+
+    /// Height at the moment the grip was grabbed. The gesture reports total
+    /// translation from the start, not a per-frame delta, so the drag has to be
+    /// applied against this rather than against the current height.
+    private var dragStartHeight: CGFloat?
+
+    private func resize(byDragging translationY: CGFloat) {
+        guard let panel else { return }
+        let start = dragStartHeight ?? panel.frame.height
+        dragStartHeight = start
+        let target = min(max(start + translationY, panel.minSize.height), panel.maxSize.height)
+        var r = panel.frame
+        r.origin.y = r.maxY - target      // top edge stays under the menu bar
+        r.size.height = target
+        panel.setFrame(r, display: true)
+    }
+
+    private func commitDraggedHeight() {
+        guard let panel else { return }
+        dragStartHeight = nil
+        settings.panelHeight = Double(panel.frame.height)
     }
 
     // MARK: - Positioning
@@ -220,6 +233,10 @@ final class PanelController {
             x = min(max(x, vis.minX), vis.maxX - panelSize.width)
         }
         panel.setFrameOrigin(NSPoint(x: x, y: y))
+        // Positioned. From here a content-driven resize grows downward from
+        // this top edge instead of climbing into the menu bar and being shoved
+        // back onto the screen.
+        (panel as? DropPanel)?.keepsTopEdge = true
     }
 
     // MARK: - Click-outside dismiss

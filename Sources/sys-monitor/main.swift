@@ -459,7 +459,10 @@ MainActor.assumeIsolated {
             .environmentObject(settings)
             .environmentObject(panelState)
         let host = NSHostingController(rootView: root)
-        if !regress { host.sizingOptions = [] }
+        // The fix that broke the app on 2026-09-07: it pins the height
+        // perfectly and the panel opens blank. Kept as a mutation switch so the
+        // content assertion below is proven to catch it.
+        if CommandLine.arguments.contains("--break-content") { host.sizingOptions = [] }
 
         let chosenHeight: CGFloat = 609
         let panel = DropPanel(
@@ -474,6 +477,8 @@ MainActor.assumeIsolated {
         panel.orderFront(nil)
         panel.setFrame(NSRect(x: -20000, y: -20000, width: 360, height: chosenHeight),
                        display: true)
+        if !regress { panel.keepsTopEdge = true }
+        let topBefore = panel.frame.maxY
         RunLoop.main.run(until: Date().addingTimeInterval(0.5))
         let before = panel.frame.height
 
@@ -486,14 +491,55 @@ MainActor.assumeIsolated {
         RunLoop.main.run(until: Date().addingTimeInterval(0.8))
         let after = panel.frame.height
 
-        print(String(format: "sizingOptions %@  height %.0f -> %.0f (data) -> %.0f (expand)  user chose %.0f",
-                     regress ? "default" : "[]", before, afterData, after, chosenHeight))
-        if after != before {
-            FileHandle.standardError.write(
-                Data("probe-resize: the window moved off the user's height\n".utf8))
-            exit(1)
+        // Height alone is not the contract. Clearing sizingOptions held the
+        // height perfectly and stopped the content laying out, so the panel
+        // opened blank; the probe passed and the app was broken. Measure that
+        // the content actually occupies the window too.
+        let contentH = panel.contentView?.frame.height ?? 0
+        let fitting = host.view.fittingSize
+        let topAfter = panel.frame.maxY
+        print(String(format: "topEdge %@  height %.0f -> %.0f (data) -> %.0f (expand)  top %.0f -> %.0f  content %.0f  fitting %.0fx%.0f",
+                     regress ? "free" : "kept", before, afterData, after,
+                     topBefore, topAfter, contentH, fitting.width, fitting.height))
+
+        // Numbers said the panel was fine while it was blank, and again while
+        // its header was clipped off the top. Write the pixels at the pinned
+        // height so the check is something a person can look at.
+        if let i = CommandLine.arguments.firstIndex(of: "--shot"),
+           i + 1 < CommandLine.arguments.count,
+           let view = panel.contentView,
+           let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+            view.cacheDisplay(in: view.bounds, to: rep)
+            let out = NSImage(size: view.bounds.size)
+            out.lockFocus()
+            NSColor(calibratedWhite: 0.16, alpha: 1).setFill()
+            NSRect(origin: .zero, size: view.bounds.size).fill()
+            NSImage(size: view.bounds.size, flipped: false, drawingHandler: { r in
+                rep.draw(in: r); return true
+            }).draw(at: .zero, from: .zero, operation: .sourceOver, fraction: 1)
+            out.unlockFocus()
+            if let tiff = out.tiffRepresentation,
+               let bmp = NSBitmapImageRep(data: tiff),
+               let png = bmp.representation(using: .png, properties: [:]) {
+                try? png.write(to: URL(fileURLWithPath: CommandLine.arguments[i + 1]))
+            }
         }
-        exit(0)
+
+        var failed = false
+        // The height may grow to fit an opened section. What must not move is
+        // the top edge: letting it climb into the menu bar is what got the
+        // window shoved back onto the screen, which reads as a snap to centre.
+        if abs(topAfter - topBefore) > 0.5 {
+            FileHandle.standardError.write(
+                Data("probe-resize: the top edge moved; AppKit will re-seat the panel\n".utf8))
+            failed = true
+        }
+        if contentH < min(after, chosenHeight) - 1 || fitting.width < 100 || fitting.height < 100 {
+            FileHandle.standardError.write(
+                Data("probe-resize: the content did not lay out to fill the window\n".utf8))
+            failed = true
+        }
+        exit(failed ? 1 : 0)
     }
 
     // Does a REAL status item resolve to a screen, and what does that screen

@@ -82,6 +82,12 @@ struct PanelRootView: View {
     @State private var pidDisplayName: [Int32: String] = [:]
 
     let onShowSettings: () -> Void
+    /// Live height drag from the grip. AppKit's own resize edge is a couple of
+    /// points and an AppKit grip laid over the hosting view never receives a
+    /// mouse, because NSHostingView owns hit-testing for its whole area. So the
+    /// grab target is a SwiftUI view and the window work happens in the caller.
+    var onResizeDrag: ((CGFloat) -> Void)? = nil
+    var onResizeEnd: (() -> Void)? = nil
 
     private var sortBy: SettingsStore.ProcSort { settings.defaultSort }
     private func setSortBy(_ s: SettingsStore.ProcSort) { settings.defaultSort = s }
@@ -89,6 +95,7 @@ struct PanelRootView: View {
     typealias ProcSort = SettingsStore.ProcSort
 
     @StateObject private var hoverHelp = HoverHelp()
+    @State private var gripHover = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -114,10 +121,17 @@ struct PanelRootView: View {
             }
             loadLine
             footer
+            resizeGrip
         }
         .environmentObject(hoverHelp)
         .padding(DesignTokens.Space.s)
+        // Fill the window's height and hang from the top. Without a height
+        // constraint the stack lays out at its ideal and gets centred, so a
+        // panel shorter than its content loses the CPU header off the top edge.
+        // The process list is the flexible child and absorbs the difference
+        // down to its 140 pt floor.
         .frame(width: 360)
+        .frame(maxHeight: .infinity, alignment: .top)
         .background(
             // Vibrant material so the dropdown has the standard menu-bar
             // feel even though we own the window chrome.
@@ -666,6 +680,30 @@ struct PanelRootView: View {
             Spacer()
             footerButton("power", tint: .red, help: "Quit sys-monitor") { NSApp.terminate(nil) }
         }
+    }
+
+    /// The height-drag target. 12 pt tall, three times AppKit's own resize
+    /// edge, with a visible bar so it reads as a control rather than as an
+    /// invisible strip a person has to discover.
+    private var resizeGrip: some View {
+        ZStack {
+            Color.primary.opacity(gripHover ? 0.06 : 0.001)
+            Capsule()
+                .fill(Color.primary.opacity(gripHover ? 0.45 : 0.22))
+                .frame(width: 34, height: 3)
+        }
+        .frame(height: 12)
+        .contentShape(Rectangle())
+        .onHover { h in
+            gripHover = h
+            if h { NSCursor.resizeUpDown.push() } else { NSCursor.pop() }
+        }
+        .gesture(
+            DragGesture(minimumDistance: 0, coordinateSpace: .global)
+                .onChanged { v in onResizeDrag?(v.translation.height) }
+                .onEnded { _ in onResizeEnd?() }
+        )
+        .explain("Drag to change the panel height")
     }
 
     /// Launch Activity Monitor, resolved by bundle id with a path fallback.
