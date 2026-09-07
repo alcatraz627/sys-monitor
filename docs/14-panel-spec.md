@@ -290,11 +290,16 @@ Listed so a reviewer can go past them rather than rediscover them.
    reads the stored set as `?? []`, so a new install shows none of section 4's expanded
    content. Section 2.4's budget argument justifies opt-in detail; it does not justify a
    first run in which the flagship surface is undiscoverable.
-2. **The per-core heatmap is empty when you open it.** `perCoreHistory` is appended only
-   in `readFullCPU`, which only `openTick` calls, so nothing accrues while the panel is
-   closed. At one column per second against a default 60 s window, or 120 s if configured,
-   the heatmap needs the panel held open that long before it looks like section 4.2
-   describes.
+2. **Expanding CPU with no history renders nothing at all.** `perCoreHistory` is appended
+   only in `readFullCPU`, which only `openTick` calls, so nothing accrues while the panel
+   is closed. With an empty history `CoreHeatmap.groups` yields no groups and the VStack
+   draws zero rows, so the section looks exactly as it did collapsed apart from a rotated
+   caret. There is no measuring or empty state. Confirmed by render: the `cpu-expanded-cold`
+   probe case is 476 pt against the warm `cpu-expanded` case's 597 pt, the missing 121 pt
+   being the heatmap. It then fills one column per second against a 60 s default window, or
+   120 s if configured, so reaching what section 4.2 describes needs the panel held open
+   that long. The collapsed-by-default ruling makes this sharper rather than softer: the
+   surface is now only ever reached deliberately, and it is blank on arrival.
 3. **The per-core strip uses the old ramp.** Section 5, row three. The strip predates the
    two-signal policy and still colours on `cpuWarn` and `cpuCritical`.
 4. **`cpuWarn` carries two unrelated meanings.** It is the severity gate and the per-core
@@ -329,8 +334,10 @@ sys-monitor --probe                  # headless sampler readout
 defaults read dev.sys-monitor.menubar      # what the running app actually persists
 ```
 
-Two warnings about evidence. `--probe-panel` force-sets the expanded set and supplies a
-synthetic pre-filled history, so it renders the ideal state of every surface and can never
-fail on divergences 1 or 2. And a claim about what the app does is only true of
+Two warnings about evidence. Most `--probe-panel` cases force-set the expanded set and
+supply a synthetic pre-filled history, so they render the ideal state of every surface. Two
+cases exist to break that: `first-launch` leaves `SettingsStore` at its own defaults, and
+`cpu-expanded-cold` opens CPU against an empty history. Read those before believing a
+render. And a claim about what the app does is only true of
 `~/Applications/sys-monitor.app`, which is the copy the login item resolves; verifying the
 repo copy has produced a wrong answer before.

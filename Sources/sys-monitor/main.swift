@@ -196,6 +196,20 @@ MainActor.assumeIsolated {
     if let i = CommandLine.arguments.firstIndex(of: "--probe-panel") {
         let dir = (i + 1 < CommandLine.arguments.count && !CommandLine.arguments[i + 1].hasPrefix("--"))
             ? CommandLine.arguments[i + 1] : NSTemporaryDirectory()
+
+        // A probe whose output is read as evidence must not report a file it
+        // did not write. Create the directory up front and fail loudly here,
+        // rather than per-case at a write that used to be `try?`.
+        do {
+            try FileManager.default.createDirectory(atPath: dir,
+                                                    withIntermediateDirectories: true)
+        } catch {
+            FileHandle.standardError.write(
+                Data("probe-panel: cannot create \(dir): \(error.localizedDescription)\n".utf8))
+            exit(1)
+        }
+        var probeFailures = 0
+
         let app = NSApplication.shared
         app.setActivationPolicy(.prohibited)
 
@@ -218,8 +232,10 @@ MainActor.assumeIsolated {
             return out
         }
 
+        // `warm: false` models a panel opened seconds ago: the history rings are
+        // still empty because per-core samples accrue only in the open tier.
         func snapshot(reclaim: ReclaimRate?, severity: MetricSeverity,
-                      pressure: MemoryPressure) -> MetricsSnapshot {
+                      pressure: MemoryPressure, warm: Bool = true) -> MetricsSnapshot {
             var s = MetricsSnapshot.initial()
             s.cpu = .ok(CPUSample(overall: 0.34,
                                   perCore: (0..<18).map { Double(($0 * 7) % 100) / 100.0 }))
@@ -254,7 +270,7 @@ MainActor.assumeIsolated {
                 }
                 hist.append(rb)
             }
-            s.perCoreHistory = hist
+            s.perCoreHistory = warm ? hist : []
             s.processes = .ok(procs(10))
             s.perProcessNetAvailable = true
             s.loadAverage = LoadAverage(one: 3.1, five: 2.8, fifteen: 2.4,
@@ -267,6 +283,11 @@ MainActor.assumeIsolated {
             let snap: MetricsSnapshot
             let expanded: Set<SettingsStore.PanelSection>
             let sort: SettingsStore.ProcSort
+            /// Leave SettingsStore at whatever its own initialiser produces.
+            /// Every other case forces `expandedSections`, so the probe could
+            /// only ever render surfaces as if the user had already opened
+            /// them, and could not fail on a default that hides one.
+            var storedDefaults = false
         }
         let calm = ReclaimRate(stallPagesPerSec: 0, evictPagesPerSec: 0)
         let busy = ReclaimRate(stallPagesPerSec: 640, evictPagesPerSec: 900)
@@ -294,6 +315,20 @@ MainActor.assumeIsolated {
         cases.append(PanelCase(name: "power-sort",
                                snap: snapshot(reclaim: calm, severity: .normal, pressure: .normal),
                                expanded: [], sort: .pwr))
+        // What a person actually meets on a fresh install: no settings written,
+        // so every section is collapsed. The other cases force the expanded set
+        // and so can never show this.
+        cases.append(PanelCase(name: "first-launch",
+                               snap: snapshot(reclaim: calm, severity: .normal, pressure: .normal,
+                                              warm: false),
+                               expanded: [], sort: .cpu, storedDefaults: true))
+        // CPU opened before any per-core history has accrued. The heatmap is
+        // blank here and stays blank for a full window; the warm cpu-expanded
+        // case renders the same surface at its best and hides that entirely.
+        cases.append(PanelCase(name: "cpu-expanded-cold",
+                               snap: snapshot(reclaim: calm, severity: .normal, pressure: .normal,
+                                              warm: false),
+                               expanded: [.cpu], sort: .cpu))
 
         for c in cases {
             let name = c.name, snap = c.snap, expanded = c.expanded, sort = c.sort
@@ -303,8 +338,10 @@ MainActor.assumeIsolated {
             let defaults = UserDefaults(suiteName: suite)!
             defaults.removePersistentDomain(forName: suite)
             let settings = SettingsStore(defaults: defaults)
-            settings.expandedSections = expanded
-            settings.defaultSort = sort
+            if !c.storedDefaults {
+                settings.expandedSections = expanded
+                settings.defaultSort = sort
+            }
             let panelState = PanelState()
 
             let root = PanelRootView(onShowSettings: {})
@@ -343,14 +380,33 @@ MainActor.assumeIsolated {
 
             guard let tiff = out.tiffRepresentation,
                   let bmp = NSBitmapImageRep(data: tiff),
-                  let png = bmp.representation(using: .png, properties: [:]) else { continue }
+                  let png = bmp.representation(using: .png, properties: [:]) else {
+                FileHandle.standardError.write(Data("probe-panel: \(name): PNG encode failed\n".utf8))
+                probeFailures += 1
+                window.orderOut(nil)
+                continue
+            }
             let path = (dir as NSString).appendingPathComponent("panel-\(name).png")
-            try? png.write(to: URL(fileURLWithPath: path))
+            do {
+                try png.write(to: URL(fileURLWithPath: path))
+            } catch {
+                FileHandle.standardError.write(
+                    Data("probe-panel: \(name): write failed: \(error.localizedDescription)\n".utf8))
+                probeFailures += 1
+                window.orderOut(nil)
+                continue
+            }
             print(String(format: "%-16s %4.0f x %4.0f  %@", (name as NSString).utf8String!,
                          bounds.width, bounds.height, path))
             window.orderOut(nil)
         }
-        exit(0)
+        // The exit code is the contract: a caller citing these renders as
+        // evidence needs one signal that every case actually reached disk.
+        if probeFailures > 0 {
+            FileHandle.standardError.write(
+                Data("probe-panel: \(probeFailures) of \(cases.count) case(s) produced no file\n".utf8))
+        }
+        exit(probeFailures == 0 ? 0 : 1)
     }
 
     // Does a REAL status item resolve to a screen, and what does that screen
