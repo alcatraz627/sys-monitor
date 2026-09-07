@@ -430,6 +430,171 @@ MainActor.assumeIsolated {
         exit(probeFailures == 0 ? 0 : 1)
     }
 
+    // Is the zoom UNIFORM? Renders the same panel across every step and checks
+    // that each one is the 100% render scaled by exactly its factor. Uniformity
+    // is a property of ratios, so it is measured rather than eyeballed: a
+    // per-layer rounding that makes one string bigger than its sibling shows up
+    // as a row whose measured offset does not match its zoom.
+    //   --probe-zoom-grid <outdir>
+    if let i = CommandLine.arguments.firstIndex(of: "--probe-zoom-grid") {
+        guard i + 1 < CommandLine.arguments.count else {
+            FileHandle.standardError.write(Data("probe-zoom-grid: needs an output dir\n".utf8))
+            exit(2)
+        }
+        let dir = CommandLine.arguments[i + 1]
+        do {
+            try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        } catch {
+            FileHandle.standardError.write(
+                Data("probe-zoom-grid: cannot create \(dir): \(error.localizedDescription)\n".utf8))
+            exit(1)
+        }
+        let app = NSApplication.shared
+        app.setActivationPolicy(.prohibited)
+
+        var rows: [(Double, CGFloat, CGFloat)] = []
+        var failures = 0
+        for step in 5...20 {
+            let z = Double(step) / 10.0
+            let suite = "probe.zoomgrid.\(step)"
+            let defaults = UserDefaults(suiteName: suite)!
+            defaults.removePersistentDomain(forName: suite)
+            let settings = SettingsStore(defaults: defaults)
+            settings.panelZoom = z
+            let store = MetricsStore()
+            let panelState = PanelState()
+            let root = PanelRootView(onShowSettings: {})
+                .environmentObject(store)
+                .environmentObject(settings)
+                .environmentObject(panelState)
+            let host = NSHostingController(rootView: root)
+            let win = NSWindow(contentRect: NSRect(x: -20000, y: -20000,
+                                                   width: 360 * z, height: 720 * z),
+                               styleMask: [.borderless], backing: .buffered, defer: false)
+            win.contentViewController = host
+            win.backgroundColor = .clear
+            win.orderFront(nil)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.45))
+            guard let v = win.contentView, v.bounds.width > 0 else {
+                FileHandle.standardError.write(
+                    Data("probe-zoom-grid: zoom \(z): no laid-out content\n".utf8))
+                failures += 1
+                win.orderOut(nil)
+                continue
+            }
+            rows.append((z, v.bounds.width, v.bounds.height))
+            if let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) {
+                v.cacheDisplay(in: v.bounds, to: rep)
+                if let png = rep.representation(using: .png, properties: [:]) {
+                    let p = (dir as NSString).appendingPathComponent(String(format: "zoom-%03d.png", step * 10))
+                    try? png.write(to: URL(fileURLWithPath: p))
+                }
+            }
+            win.orderOut(nil)
+        }
+
+        // The 100% row is the reference every other row is judged against.
+        guard let base = rows.first(where: { abs($0.0 - 1.0) < 0.001 }) else {
+            FileHandle.standardError.write(Data("probe-zoom-grid: no 100% reference row\n".utf8))
+            exit(1)
+        }
+        print("zoom   width   height   w/base  h/base   verdict")
+        for (z, w, h) in rows {
+            let wr = w / base.1, hr = h / base.2
+            // One device pixel of slack at each edge; anything past that is a
+            // proportion that did not hold.
+            let wOK = abs(Double(wr) - z) <= 0.01
+            let hOK = abs(Double(hr) - z) <= 0.01
+            if !(wOK && hOK) { failures += 1 }
+            print(String(format: "%.1f   %6.1f  %6.1f   %5.3f   %5.3f   %@",
+                         z, w, h, Double(wr), Double(hr),
+                         (wOK && hOK) ? "ok" : "NOT PROPORTIONAL"))
+        }
+        if failures > 0 {
+            FileHandle.standardError.write(
+                Data("probe-zoom-grid: \(failures) zoom level(s) are not proportional\n".utf8))
+        }
+        exit(failures == 0 ? 0 : 1)
+    }
+
+    // What does the WINDOW SERVER actually composite? --probe-panel renders via
+    // cacheDisplay, which re-draws the view tree into a fresh bitmap at final
+    // resolution, so it cannot see a layer that was rasterised small and then
+    // scaled up. This puts a real window on screen and reads back what was
+    // composited, which is what a person sees.
+    //   --probe-live <out.png> [--zoom N]
+    if let i = CommandLine.arguments.firstIndex(of: "--probe-live") {
+        guard i + 1 < CommandLine.arguments.count else {
+            FileHandle.standardError.write(Data("probe-live: needs an output path\n".utf8))
+            exit(2)
+        }
+        let outPath = CommandLine.arguments[i + 1]
+        var zoom = 2.0
+        if let zi = CommandLine.arguments.firstIndex(of: "--zoom"), zi + 1 < CommandLine.arguments.count {
+            zoom = Double(CommandLine.arguments[zi + 1]) ?? 2.0
+        }
+        let app = NSApplication.shared
+        app.setActivationPolicy(.accessory)
+
+        let suite = "probe.live"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        let settings = SettingsStore(defaults: defaults)
+        settings.panelZoom = zoom
+        let store = MetricsStore()
+        let panelState = PanelState()
+        let root = PanelRootView(onShowSettings: {})
+            .environmentObject(store)
+            .environmentObject(settings)
+            .environmentObject(panelState)
+        let host = NSHostingController(rootView: root)
+        let win = NSWindow(contentRect: NSRect(x: 60, y: 120, width: 360 * zoom, height: 500 * zoom),
+                           styleMask: [.borderless], backing: .buffered, defer: false)
+        win.contentViewController = host
+        win.backgroundColor = .black
+        win.level = .floating
+        win.orderFront(nil)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.6))
+        // Re-state the size: the hosting controller sizes the window from the
+        // content, and the content only knows its height after a layout pass.
+        win.setFrame(NSRect(x: 60, y: 120, width: 360 * zoom, height: 500 * zoom),
+                     display: true)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.8))
+
+        let wid = CGWindowID(win.windowNumber)
+        guard let img = CGWindowListCreateImage(.null, .optionIncludingWindow, wid,
+                                                [.boundsIgnoreFraming, .bestResolution]) else {
+            FileHandle.standardError.write(Data("probe-live: window capture failed\n".utf8))
+            exit(1)
+        }
+        let rep = NSBitmapImageRep(cgImage: img)
+        guard let png = rep.representation(using: .png, properties: [:]) else {
+            FileHandle.standardError.write(Data("probe-live: PNG encode failed\n".utf8))
+            exit(1)
+        }
+        do { try png.write(to: URL(fileURLWithPath: outPath)) } catch {
+            FileHandle.standardError.write(
+                Data("probe-live: write failed: \(error.localizedDescription)\n".utf8))
+            exit(1)
+        }
+        // Also write the cacheDisplay render of the SAME window, so the two
+        // paths can be compared at the same content. If the composited one is
+        // softer, the transform is upscaling a raster.
+        if let v = win.contentView,
+           let crep = v.bitmapImageRepForCachingDisplay(in: v.bounds) {
+            v.cacheDisplay(in: v.bounds, to: crep)
+            if let cpng = crep.representation(using: .png, properties: [:]) {
+                try? cpng.write(to: URL(fileURLWithPath: outPath + ".cachedisplay.png"))
+                print("cacheDisplay rep \(crep.pixelsWide)x\(crep.pixelsHigh) px")
+            }
+        }
+        print("live zoom \(zoom)  composited \(img.width)x\(img.height) px  "
+              + "backingScale \(win.backingScaleFactor)  "
+              + "screen \(NSScreen.main?.backingScaleFactor ?? -1)  -> \(outPath)")
+        win.orderOut(nil)
+        exit(0)
+    }
+
     // Does the panel keep the height the user dragged when a section expands?
     // It did not: NSHostingController pushes the content's size extrema onto
     // the window, and `updateWindowContentSizeExtremaIfNecessary` re-framed it.

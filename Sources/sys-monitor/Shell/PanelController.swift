@@ -46,6 +46,31 @@ final class PanelController {
 
     private var pinSync: AnyCancellable?
     private var zoomSync: AnyCancellable?
+    private weak var hostView: NSView?
+
+    /// Rasterise the panel's layers at the size they are finally drawn at.
+    ///
+    /// `scaleEffect` is a layer transform: Core Animation rasterises at the
+    /// layer's `contentsScale` and then stretches, so at 200% on a Retina
+    /// display the 2x raster is spread over four times the area and the panel
+    /// reads coarse. Multiplying `contentsScale` by the zoom makes the text
+    /// rasterise at the final size instead.
+    ///
+    /// UNVERIFIED on this machine: the test rig reports backingScaleFactor 1.0,
+    /// where there is no Retina raster to lose and both render paths measure
+    /// identical. Confirmed only on a 2x display.
+    private func applyRasterScale() {
+        guard let v = hostView else { return }
+        let backing = panel?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        let target = backing * CGFloat(settings.panelZoom)
+        v.wantsLayer = true
+        func walk(_ layer: CALayer) {
+            layer.contentsScale = target
+            layer.rasterizationScale = target
+            layer.sublayers?.forEach(walk)
+        }
+        if let l = v.layer { walk(l) }
+    }
 
     init(store: MetricsStore, settings: SettingsStore, coordinator: SamplingCoordinator) {
         self.store = store
@@ -77,6 +102,9 @@ final class PanelController {
         r.size = NSSize(width: w, height: h)
         panel.setFrame(r, display: true)
         anchor(panel: panel)
+        // SwiftUI rebuilds layers as the tree changes, so the raster scale is
+        // re-applied on every zoom rather than set once at construction.
+        applyRasterScale()
     }
 
     /// Close the panel without dismissing-via-event. Used by the settings
@@ -195,7 +223,10 @@ final class PanelController {
         .environmentObject(store)
         .environmentObject(settings)
         .environmentObject(panelState)
-        panel.contentViewController = NSHostingController(rootView: root)
+        let host = NSHostingController(rootView: root)
+        panel.contentViewController = host
+        hostView = host.view
+        applyRasterScale()
         panel.onCancel = { [weak self] in
             guard let self, !self.isPinned else { return }
             self.close()

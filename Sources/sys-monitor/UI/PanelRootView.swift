@@ -159,8 +159,11 @@ struct PanelRootView: View {
         })
         .onPreferenceChange(PanelHeightKey.self) { naturalHeight = $0 }
         .scaleEffect(settings.panelZoom, anchor: .topLeading)
+        // Height stays unconstrained until the measurement arrives. Stating a
+        // height of 1 * zoom on the first pass makes the hosting controller
+        // size the window to two pixels before the preference propagates.
         .frame(width: 360 * settings.panelZoom,
-               height: max(naturalHeight, 1) * settings.panelZoom,
+               height: naturalHeight > 0 ? naturalHeight * settings.panelZoom : nil,
                alignment: .topLeading)
     }
 
