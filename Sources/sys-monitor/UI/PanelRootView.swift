@@ -131,7 +131,8 @@ struct PanelRootView: View {
 
     private var cpuSection: some View {
         VStack(alignment: .leading, spacing: DesignTokens.Space.xs) {
-            HStack(spacing: DesignTokens.Space.s) {
+            SectionHeader(expanded: settings.expandedSections.contains(.cpu),
+                          onTap: { settings.toggleSection(.cpu) }) {
                 Text("CPU").font(DesignTokens.numericFont(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .explain("Overall CPU load; sparkline shows the last \(Int(settings.historyWindowSeconds)) s on a fixed 0–100% scale")
@@ -158,10 +159,7 @@ struct PanelRootView: View {
                     .foregroundStyle(cpuSeverity == .normal
                         ? Color.primary
                         : DesignTokens.severityColor(cpuSeverity))
-                SectionCaret(expanded: settings.expandedSections.contains(.cpu))
             }
-            .contentShape(Rectangle())
-            .onTapGesture { settings.toggleSection(.cpu) }
             // Sparkline carries "now + recent"; the per-core strip carries
             // distribution. The overall bar was a third encoding of "now"
             // and ate vertical real estate for no extra signal.
@@ -174,13 +172,17 @@ struct PanelRootView: View {
             if settings.expandedSections.contains(.cpu) {
                 CoreHeatmap(histories: store.snapshot.perCoreHistory,
                             clusters: Self.clusters)
+                    // An expansion pushes its own divider a screenful away, so
+                    // without this the detail reads as the next section's.
+                    .padding(.bottom, DesignTokens.Space.s)
             }
         }
     }
 
     private var memorySection: some View {
         VStack(alignment: .leading, spacing: DesignTokens.Space.xs) {
-            HStack(spacing: DesignTokens.Space.s) {
+            SectionHeader(expanded: settings.expandedSections.contains(.mem),
+                          onTap: { settings.toggleSection(.mem) }) {
                 Text("MEM").font(DesignTokens.numericFont(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .explain("Used memory (active + wired + compressed); sparkline shows the last \(Int(settings.historyWindowSeconds)) s, auto-scaled to the corner labels")
@@ -190,10 +192,7 @@ struct PanelRootView: View {
                     .foregroundStyle(memSeverity == .normal
                         ? Color.primary
                         : DesignTokens.severityColor(memSeverity))
-                SectionCaret(expanded: settings.expandedSections.contains(.mem))
             }
-            .contentShape(Rectangle())
-            .onTapGesture { settings.toggleSection(.mem) }
             // Auto-scale because memory sits in a narrow band; minSpan
             // keeps the trace from amplifying single-percent jitter.
             // Range labels because auto-scale renders a 2% wobble with
@@ -205,6 +204,7 @@ struct PanelRootView: View {
             }
             if settings.expandedSections.contains(.mem) {
                 memoryPoolsView
+                    .padding(.bottom, DesignTokens.Space.s)
             }
             HStack(spacing: DesignTokens.Space.m) {
                 Text("swap \(swapText)")
@@ -1198,6 +1198,39 @@ private struct SectionCaret: View {
     }
 }
 
+/// A metric section's header row. Owns three things every section needs and
+/// none of them got consistently: the caret sits first, so the eye finds the
+/// same control in the same place in all four; the row shades under the
+/// pointer, because nothing else said the header was clickable; and the whole
+/// row is the hit target, since a 10 pt caret is not one.
+///
+/// The shade is painted by a background inset outward rather than by padding,
+/// so adopting this moved no pixel of the existing layout.
+private struct SectionHeader<Content: View>: View {
+    let expanded: Bool
+    let onTap: () -> Void
+    @ViewBuilder var content: Content
+
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: DesignTokens.Space.s) {
+            SectionCaret(expanded: expanded)
+            content
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 4)
+                .fill(Color.primary.opacity(hovering ? 0.07 : 0))
+                .padding(.horizontal, -4)
+                .padding(.vertical, -3)
+        )
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .onTapGesture(perform: onTap)
+        .animation(.easeOut(duration: 0.12), value: hovering)
+    }
+}
+
 /// Where the machine's memory actually is, one bar plus the numbers.
 ///
 /// Apple Silicon has one physical pool, so these are competing claims on the
@@ -1319,15 +1352,13 @@ private struct ThroughputCell: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 3) {
+            SectionHeader(expanded: expanded,
+                          onTap: { settings.toggleSection(section) }) {
                 Text(label)
                     .font(DesignTokens.numericFont(size: 10, weight: .semibold))
                     .foregroundStyle(.secondary)
-                SectionCaret(expanded: expanded)
                 Spacer(minLength: 0)
             }
-            .contentShape(Rectangle())
-            .onTapGesture { settings.toggleSection(section) }
             .explain(label == "NET"
                   ? "Network throughput across all interfaces: ↓ received · ↑ sent, per second. Sparkline = last \(Int(settings.historyWindowSeconds)) s of total activity, log-scaled. Expand for the processes behind it."
                   : "Disk throughput across all drives: ↓ read · ↑ written, per second. Sparkline = last \(Int(settings.historyWindowSeconds)) s of total activity, log-scaled. Expand for the processes behind it.")
@@ -1369,6 +1400,7 @@ private struct ThroughputCell: View {
                     }
                 }
                 .padding(.top, 1)
+                .padding(.bottom, DesignTokens.Space.s)
                 .explain("The processes behind this number, busiest first. Only processes this app can see; the coverage row says how many it cannot.")
             }
         }

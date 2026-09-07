@@ -25,4 +25,10 @@ final class DropPanel: NSPanel {
     override func cancelOperation(_ sender: Any?) {
         onCancel?()
     }
+
+    /// `.resizable` is in the style mask so the height can be dragged, and it
+    /// brings AppKit's double-click-to-zoom with it. On a dropdown anchored to
+    /// a status item that is never wanted: a double click anywhere in the
+    /// panel re-framed it against min/max and dropped it in the screen centre.
+    override func zoom(_ sender: Any?) {}
 }
