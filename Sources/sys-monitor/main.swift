@@ -369,6 +369,13 @@ MainActor.assumeIsolated {
             window.contentViewController = host
             window.backgroundColor = .clear
             window.orderFront(nil)
+            // Re-state the size. The panel now fills its container, so the
+            // hosting controller sizes the window to the view's MINIMUM unless
+            // told otherwise; the real PanelController sets the frame the same
+            // way. Without this every case renders truncated at min height.
+            window.setFrame(NSRect(x: -20000, y: -20000,
+                                   width: 360 * c.zoom, height: 720 * c.zoom),
+                            display: true)
             window.displayIfNeeded()
             RunLoop.main.run(until: Date().addingTimeInterval(0.6))
 

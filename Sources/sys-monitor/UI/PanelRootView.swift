@@ -96,12 +96,27 @@ struct PanelRootView: View {
 
     @StateObject private var hoverHelp = HoverHelp()
     @State private var gripHover = false
-    /// The panel's unscaled layout height, measured rather than assumed, so
-    /// the zoomed frame can state a real size to the hosting controller.
-    @State private var naturalHeight: CGFloat = 0
 
     var body: some View {
-        panelBody()
+        // The WINDOW is authoritative for size; the content divides by the zoom
+        // and scales back up to fill it. Measuring the content instead left
+        // naturalHeight at 0, so the height frame fell to nil and the panel
+        // reported its unscaled height at every zoom: --probe-zoom-grid showed
+        // width tracking 0.5 to 2.0 exactly while height sat at 499 throughout.
+        //
+        // minWidth/minHeight exist because a bare GeometryReader reports a zero
+        // ideal and NSHostingController then shrinks the window to nothing.
+        GeometryReader { geo in
+            panelBody()
+                .frame(width: 360,
+                       height: max(geo.size.height / settings.panelZoom, 1),
+                       alignment: .top)
+                .scaleEffect(settings.panelZoom, anchor: .topLeading)
+                .frame(width: geo.size.width, height: geo.size.height,
+                       alignment: .topLeading)
+        }
+        .frame(minWidth: 360 * settings.panelZoom,
+               minHeight: 320 * settings.panelZoom)
         .background(
             // Vibrant material so the dropdown has the standard menu-bar
             // feel even though we own the window chrome.
@@ -140,31 +155,9 @@ struct PanelRootView: View {
         }
         .environmentObject(hoverHelp)
         .padding(DesignTokens.Space.s)
-        // Zoom scales the finished layout rather than the design tokens, so
-        // every raw literal in the tree (a 5 pt heat row, a 3 pt capsule) is
-        // carried by construction and proportions cannot drift.
-        //
-        // scaleEffect is a geometry effect: it does not change the size the
-        // view reports, and the hosting controller sizes the window from that
-        // report. So the natural height is measured and the outer frame states
-        // the scaled size explicitly. A GeometryReader here instead reports a
-        // zero ideal and the controller shrinks the window to nothing.
-        .frame(width: 360)
-        // fixedSize isolates the measurement. Without it the outer frame below
-        // is derived from this reading and also feeds it, and the loop runs
-        // away until AppKit traps on a constraint past its limit.
-        .fixedSize(horizontal: false, vertical: true)
-        .background(GeometryReader { g in
-            Color.clear.preference(key: PanelHeightKey.self, value: g.size.height)
-        })
-        .onPreferenceChange(PanelHeightKey.self) { naturalHeight = $0 }
-        .scaleEffect(settings.panelZoom, anchor: .topLeading)
-        // Height stays unconstrained until the measurement arrives. Stating a
-        // height of 1 * zoom on the first pass makes the hosting controller
-        // size the window to two pixels before the preference propagates.
-        .frame(width: 360 * settings.panelZoom,
-               height: naturalHeight > 0 ? naturalHeight * settings.panelZoom : nil,
-               alignment: .topLeading)
+        // The panel at its natural 360 pt. `body` owns sizing and zoom, because
+        // scaling a finished layout carries every raw literal here (a 5 pt heat
+        // row, a 3 pt capsule) by construction, and proportions cannot drift.
     }
 
     // MARK: - Sections
@@ -1261,14 +1254,6 @@ private struct PickerWidth: ViewModifier {
         } else {
             content.frame(width: PanelRootView.pickerWidth(segments: segments))
         }
-    }
-}
-
-/// Carries the panel's unscaled layout height out of the view tree.
-private struct PanelHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
     }
 }
 
