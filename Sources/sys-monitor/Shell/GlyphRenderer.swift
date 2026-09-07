@@ -554,7 +554,7 @@ public struct GlyphRenderer {
     /// so the menu bar and the panel cannot disagree about the same metric.
     fileprivate static func cpuSeverityCell(_ s: MetricsSnapshot, warn: Double) -> Severity {
         switch RateMath.cpuSeverity(utilisation: cpuLoad(s),
-                                    runQueuePerCore: PanelRootView.runQueuePerCore(s),
+                                    runQueuePerCore: s.runQueuePerCore,
                                     gate: warn) {
         case .normal:   return .normal
         case .warn:     return .warn

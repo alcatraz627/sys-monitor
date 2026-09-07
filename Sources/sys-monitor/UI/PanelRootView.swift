@@ -904,16 +904,8 @@ struct PanelRootView: View {
     /// machine at 94% doing what it was asked read as alarming.
     private var cpuSeverity: MetricSeverity {
         RateMath.cpuSeverity(utilisation: cpuLoad,
-                             runQueuePerCore: Self.runQueuePerCore(store.snapshot),
+                             runQueuePerCore: store.snapshot.runQueuePerCore,
                              gate: settings.severityThresholds.cpuWarn)
-    }
-
-    /// Run queue relative to core count, or nil when there is no reading.
-    static func runQueuePerCore(_ s: MetricsSnapshot) -> Double? {
-        guard let l = s.loadAverage else { return nil }
-        let cores = Double(ProcessInfo.processInfo.activeProcessorCount)
-        guard cores > 0 else { return nil }
-        return l.one / cores
     }
 
     /// What colours the MEM row. Percent used still fills the bar and prints
@@ -1133,6 +1125,13 @@ private struct CoreHeatmap: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
+            // With no histories `groups` is empty and this VStack drew nothing,
+            // so opening the section looked identical to leaving it closed.
+            if histories.isEmpty {
+                Text("measuring")
+                    .font(DesignTokens.numericFont(size: 9))
+                    .foregroundStyle(.tertiary)
+            }
             ForEach(Array(groups.enumerated()), id: \.offset) { _, g in
                 VStack(alignment: .leading, spacing: 2) {
                     Text("\(g.name.lowercased()) · \(g.rows.count)")
@@ -1155,18 +1154,33 @@ private struct CoreHeatmap: View {
 private struct CoreHeatRow: View {
     let history: RingBuffer
 
+    /// One `Canvas`, following `GraphView`'s precedent, because a Rectangle per
+    /// point per core rebuilt every tick is 1080 views a second at the default
+    /// window and 5400 at the maximum.
+    ///
+    /// Cells are placed by timestamp, not by index. The two tiers sample at
+    /// different cadences, so an idle point covers five seconds where an open
+    /// point covers one, and equal widths would draw a dishonest time axis.
     var body: some View {
-        GeometryReader { geo in
+        Canvas { ctx, size in
             let pts = history.points
-            let n = max(pts.count, 1)
-            let w = geo.size.width / CGFloat(n)
-            HStack(spacing: 0) {
-                ForEach(Array(pts.enumerated()), id: \.offset) { _, p in
-                    Rectangle()
-                        .fill(DesignTokens.cpuHeat(p.value))
-                        .frame(width: w)
-                }
-                if pts.isEmpty { Rectangle().fill(Color.primary.opacity(0.04)) }
+            guard let first = pts.first, let last = pts.last else {
+                ctx.fill(Path(CGRect(origin: .zero, size: size)),
+                         with: .color(Color.primary.opacity(0.04)))
+                return
+            }
+            let span = max(last.timestamp - first.timestamp, 0.001)
+            let step = span / Double(max(pts.count - 1, 1))
+            for (i, p) in pts.enumerated() {
+                let nextT = i + 1 < pts.count ? pts[i + 1].timestamp : last.timestamp + step
+                // Whole-point boundaries. The heat colours are opacity over one
+                // hue, so fractional edges antialias into seams and overlapping
+                // them compounds into stripes. Rounded edges abut exactly.
+                let x = ((p.timestamp - first.timestamp) / span * Double(size.width)).rounded()
+                let nextX = ((nextT - first.timestamp) / span * Double(size.width)).rounded()
+                let w = max(nextX - x, 1)
+                ctx.fill(Path(CGRect(x: x, y: 0, width: w, height: Double(size.height))),
+                         with: .color(DesignTokens.cpuHeat(p.value)))
             }
         }
         .frame(height: 5)

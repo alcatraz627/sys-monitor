@@ -19,10 +19,22 @@ public struct MetricsSnapshot: Sendable, Equatable {
     public var loadAverage: LoadAverage? = nil     // load + uptime; read in both tiers
     public var perInterfaceNet: [InterfaceThroughput] = []  // NET breakdown; panel-tier
     public var cpuHistory: RingBuffer
-    /// One history per core, for the expanded heatmap. Empty in the idle
-    /// tier, which never reads per-core counters, and empty on the first open
-    /// tick before a delta exists.
+    /// One history per core, for the expanded heatmap. Both tiers append, so
+    /// the window is continuous across an open and close and the view is
+    /// populated the moment it is opened. Points are spaced by whichever
+    /// cadence was running, which is why the heatmap sizes cells by timestamp
+    /// rather than by index. Empty only until the first delta exists.
     public var perCoreHistory: [RingBuffer] = []
+
+    /// Run queue relative to core count, or nil when there is no reading.
+    /// Lives on the model because the glyph and the panel both feed it to
+    /// `RateMath.cpuSeverity`, and the point of that is that they agree.
+    public var runQueuePerCore: Double? {
+        guard let l = loadAverage else { return nil }
+        let cores = Double(ProcessInfo.processInfo.activeProcessorCount)
+        guard cores > 0 else { return nil }
+        return l.one / cores
+    }
     public var memHistory: RingBuffer
     public var netHistory: RingBuffer
     public var diskHistory: RingBuffer
@@ -67,7 +79,7 @@ public struct MetricsSnapshot: Sendable, Equatable {
 public struct ProcSample: Sendable, Equatable {
     public let pid: Int32
     /// Parent pid, for grouping helpers under the app that spawned them.
-    public var ppid: Int32 = 0
+    public let ppid: Int32
     public let name: String
     public let cpu: Double
     public let memBytes: UInt64

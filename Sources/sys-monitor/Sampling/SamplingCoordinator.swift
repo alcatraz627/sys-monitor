@@ -367,14 +367,12 @@ public final class SamplingCoordinator: @unchecked Sendable {
         openTickIndex = 0
         lastProcSampleTime = 0
         lastProcMetric = .measuring
-        // Per-core and process state are open-tier only — drop them so a
-        // stale value never gets reused. NET/DISK prevs ARE preserved:
-        // if the user keeps those in the bar, the idle tier also samples
-        // them, so the rate keeps computing across the transition. The
-        // gap-based re-baseline in readNet/readDisk handles the case
-        // where idle doesn't sample them (stale prev is detected by
-        // elapsed > N×tick).
-        prevPerCore = nil
+        // Process state is open-tier only, so drop it. Per-core prevs are NOT
+        // dropped any more: the idle tier reads per-core too, so the baseline
+        // stays live and the history has no gap to leave a stale trail in.
+        // NET/DISK prevs are preserved for the same reason, with the gap-based
+        // re-baseline in readNet/readDisk covering the case where idle does not
+        // sample them.
         prevProcCpu.removeAll(keepingCapacity: true)
         prevProcDisk.removeAll(keepingCapacity: true)
         prevProcNet.removeAll(keepingCapacity: true)
@@ -405,13 +403,11 @@ public final class SamplingCoordinator: @unchecked Sendable {
         openTickIndex = 0
         lastProcSampleTime = 0
         lastProcMetric = .measuring
-        // Per-core/process are open-tier only and need fresh baselines.
-        // NET/DISK prevs survive deliberately: when the idle tier was
-        // sampling them they are fresh, and the first open tick can emit a
-        // rate immediately. When it was not, their own clocks make the
-        // interval read as a gap and they re-baseline. That used to be
-        // asserted rather than true, which is the reopen spike.
-        prevPerCore = nil
+        // Process state needs fresh baselines; per-core does not, because the
+        // idle tier keeps its baseline live and the first open tick can emit a
+        // rate straight away. NET/DISK prevs survive for the same reason, with
+        // their own clocks re-baselining if idle was not sampling them. That
+        // used to be asserted rather than true, which is the reopen spike.
         prevProcCpu.removeAll(keepingCapacity: true)
         prevProcDisk.removeAll(keepingCapacity: true)
         prevProcNet.removeAll(keepingCapacity: true)
@@ -511,7 +507,11 @@ public final class SamplingCoordinator: @unchecked Sendable {
         let isGap = isGapTick(elapsed: elapsed, cadence: idleCadenceSeconds)
 
         refreshPressureLevel()
-        let cpuMetric  = readOverallCPU(now: now, isGap: isGap)
+        // Per-core is read here too, not just in the open tier. The heatmap is
+        // now the only way to reach per-core detail and it was blank on arrival,
+        // because history accrued only while the panel was open. One extra
+        // host_processor_info per idle tick buys a populated view on open.
+        let cpuMetric  = readFullCPU(now: now, isGap: isGap)
         let memMetric  = readMemory(now: now, cadence: idleCadenceSeconds)
         let netMetric: Metric<Throughput> = idleSamplesNet
             ? readNet(now: now, cadence: idleCadenceSeconds)
