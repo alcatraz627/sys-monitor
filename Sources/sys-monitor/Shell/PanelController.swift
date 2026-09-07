@@ -171,7 +171,14 @@ final class PanelController {
         .environmentObject(store)
         .environmentObject(settings)
         .environmentObject(panelState)
-        panel.contentViewController = NSHostingController(rootView: root)
+        // The panel's height belongs to the user's drag, not to the content.
+        // By default NSHostingController pushes the SwiftUI content's size
+        // extrema onto the window, and `updateWindowContentSizeExtremaIfNecessary`
+        // then calls setFrame: expanding a section walked the window 531 -> 555
+        // -> 574 -> 707 against a stored height of 609 (probe trace, 2026-09-07).
+        let host = NSHostingController(rootView: root)
+        host.sizingOptions = []
+        panel.contentViewController = host
         panel.onCancel = { [weak self] in
             guard let self, !self.isPinned else { return }
             self.close()

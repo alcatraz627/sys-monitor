@@ -409,6 +409,93 @@ MainActor.assumeIsolated {
         exit(probeFailures == 0 ? 0 : 1)
     }
 
+    // Does the panel keep the height the user dragged when a section expands?
+    // It did not: NSHostingController pushes the content's size extrema onto
+    // the window, and `updateWindowContentSizeExtremaIfNecessary` re-framed it.
+    // `--regress` restores the default sizingOptions so the guard can be seen
+    // failing; without it the frame must not move.
+    if CommandLine.arguments.contains("--probe-resize") {
+        let app = NSApplication.shared
+        app.setActivationPolicy(.prohibited)
+        let regress = CommandLine.arguments.contains("--regress")
+
+        let suite = "probe.resize"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        let settings = SettingsStore(defaults: defaults)
+        // Start empty. The trace shows the real drift happening as metrics
+        // stream in after launch, not as a response to any click.
+        let store = MetricsStore()
+        var snap = MetricsSnapshot.initial()
+        snap.cpu = .ok(CPUSample(overall: 0.34,
+                                 perCore: (0..<18).map { Double(($0 * 7) % 100) / 100.0 }))
+        var hist: [RingBuffer] = []
+        for core in 0..<18 {
+            var rb = RingBuffer(windowSeconds: 60)
+            for t in 0..<60 {
+                rb.append(HistoryPoint(timestamp: Double(t),
+                                       value: Double((core * 7 + t * 3) % 100) / 100.0))
+            }
+            hist.append(rb)
+        }
+        snap.perCoreHistory = hist
+        var rows: [ProcSample] = []
+        for k in 0..<20 {
+            let pid = Int32(100 + k)
+            let cpu: Double = Double(20 - k) / 12.0
+            let mem: UInt64 = UInt64(2_400_000_000 / (k + 1))
+            rows.append(ProcSample(pid: pid, ppid: 1, name: "proc\(k)", cpu: cpu,
+                                   memBytes: mem, diskBps: 0, netBps: 0, watts: 0.1))
+        }
+        snap.processes = .ok(rows)
+        snap.loadAverage = LoadAverage(one: 3.1, five: 2.8, fifteen: 2.4,
+                                       uptimeSeconds: 3 * 86400)
+        snap.diskSpace = DiskSpaceSample(freeBytes: 210 * 1_073_741_824,
+                                         totalBytes: 994 * 1_073_741_824)
+
+        let panelState = PanelState()
+        let root = PanelRootView(onShowSettings: {})
+            .environmentObject(store)
+            .environmentObject(settings)
+            .environmentObject(panelState)
+        let host = NSHostingController(rootView: root)
+        if !regress { host.sizingOptions = [] }
+
+        let chosenHeight: CGFloat = 609
+        let panel = DropPanel(
+            contentRect: NSRect(x: -20000, y: -20000, width: 360, height: chosenHeight),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered, defer: false)
+        panel.contentViewController = host
+        panel.styleMask.insert(.resizable)
+        panel.minSize = NSSize(width: 360, height: 320)
+        panel.maxSize = NSSize(width: 360, height: 900)
+        panel.backgroundColor = .clear
+        panel.orderFront(nil)
+        panel.setFrame(NSRect(x: -20000, y: -20000, width: 360, height: chosenHeight),
+                       display: true)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+        let before = panel.frame.height
+
+        // Metrics arrive, then a section opens. Both grow the content, and the
+        // trace shows both re-framing the window in the shipped build.
+        store.snapshot = snap
+        RunLoop.main.run(until: Date().addingTimeInterval(0.8))
+        let afterData = panel.frame.height
+        settings.expandedSections = [.cpu]
+        RunLoop.main.run(until: Date().addingTimeInterval(0.8))
+        let after = panel.frame.height
+
+        print(String(format: "sizingOptions %@  height %.0f -> %.0f (data) -> %.0f (expand)  user chose %.0f",
+                     regress ? "default" : "[]", before, afterData, after, chosenHeight))
+        if after != before {
+            FileHandle.standardError.write(
+                Data("probe-resize: the window moved off the user's height\n".utf8))
+            exit(1)
+        }
+        exit(0)
+    }
+
     // Does a REAL status item resolve to a screen, and what does that screen
     // classify as? The per-display glyph profile hangs entirely on
     // `statusItem.button?.window?.screen`, and no unit test can exercise it:
