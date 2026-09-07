@@ -96,8 +96,23 @@ struct PanelRootView: View {
 
     @StateObject private var hoverHelp = HoverHelp()
     @State private var gripHover = false
+    /// The panel's unscaled layout height, measured rather than assumed, so
+    /// the zoomed frame can state a real size to the hosting controller.
+    @State private var naturalHeight: CGFloat = 0
 
     var body: some View {
+        panelBody()
+        .background(
+            // Vibrant material so the dropdown has the standard menu-bar
+            // feel even though we own the window chrome.
+            VisualEffectBackground()
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    @ViewBuilder
+    private func panelBody() -> some View {
         VStack(alignment: .leading, spacing: 0) {
             cpuSection
             divider
@@ -125,20 +140,28 @@ struct PanelRootView: View {
         }
         .environmentObject(hoverHelp)
         .padding(DesignTokens.Space.s)
-        // Fill the window's height and hang from the top. Without a height
-        // constraint the stack lays out at its ideal and gets centred, so a
-        // panel shorter than its content loses the CPU header off the top edge.
-        // The process list is the flexible child and absorbs the difference
-        // down to its 140 pt floor.
+        // Zoom scales the finished layout rather than the design tokens, so
+        // every raw literal in the tree (a 5 pt heat row, a 3 pt capsule) is
+        // carried by construction and proportions cannot drift.
+        //
+        // scaleEffect is a geometry effect: it does not change the size the
+        // view reports, and the hosting controller sizes the window from that
+        // report. So the natural height is measured and the outer frame states
+        // the scaled size explicitly. A GeometryReader here instead reports a
+        // zero ideal and the controller shrinks the window to nothing.
         .frame(width: 360)
-        .frame(maxHeight: .infinity, alignment: .top)
-        .background(
-            // Vibrant material so the dropdown has the standard menu-bar
-            // feel even though we own the window chrome.
-            VisualEffectBackground()
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        // fixedSize isolates the measurement. Without it the outer frame below
+        // is derived from this reading and also feeds it, and the loop runs
+        // away until AppKit traps on a constraint past its limit.
+        .fixedSize(horizontal: false, vertical: true)
+        .background(GeometryReader { g in
+            Color.clear.preference(key: PanelHeightKey.self, value: g.size.height)
+        })
+        .onPreferenceChange(PanelHeightKey.self) { naturalHeight = $0 }
+        .scaleEffect(settings.panelZoom, anchor: .topLeading)
+        .frame(width: 360 * settings.panelZoom,
+               height: max(naturalHeight, 1) * settings.panelZoom,
+               alignment: .topLeading)
     }
 
     // MARK: - Sections
@@ -1235,6 +1258,14 @@ private struct PickerWidth: ViewModifier {
         } else {
             content.frame(width: PanelRootView.pickerWidth(segments: segments))
         }
+    }
+}
+
+/// Carries the panel's unscaled layout height out of the view tree.
+private struct PanelHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 

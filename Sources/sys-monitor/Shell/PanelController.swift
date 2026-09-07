@@ -45,6 +45,7 @@ final class PanelController {
     var onShowSettings: (() -> Void)?
 
     private var pinSync: AnyCancellable?
+    private var zoomSync: AnyCancellable?
 
     init(store: MetricsStore, settings: SettingsStore, coordinator: SamplingCoordinator) {
         self.store = store
@@ -55,6 +56,27 @@ final class PanelController {
         pinSync = panelState.$isPinned.dropFirst().sink { [weak settings] pinned in
             settings?.panelPinned = pinned
         }
+        // The view scales itself; the window has to follow, because its width
+        // and its size bounds are in points and would otherwise clip the zoomed
+        // content or leave a margin around it.
+        zoomSync = settings.$panelZoom.dropFirst().sink { [weak self] z in
+            Task { @MainActor [weak self] in self?.applyZoom(z) }
+        }
+    }
+
+    /// Resize the window to the zoomed layout, keeping the top edge and the
+    /// horizontal anchor under the status item.
+    private func applyZoom(_ z: Double) {
+        guard let panel else { return }
+        let w = 360 * CGFloat(z)
+        panel.minSize = NSSize(width: w, height: 320 * CGFloat(z))
+        panel.maxSize = NSSize(width: w, height: 900 * CGFloat(z))
+        var r = panel.frame
+        let h = min(max(r.height, panel.minSize.height), panel.maxSize.height)
+        r.origin.y = r.maxY - h
+        r.size = NSSize(width: w, height: h)
+        panel.setFrame(r, display: true)
+        anchor(panel: panel)
     }
 
     /// Close the panel without dismissing-via-event. Used by the settings
@@ -152,8 +174,8 @@ final class PanelController {
 
     private func makePanel() -> DropPanel {
         let panel = DropPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 360,
-                                height: settings.panelHeight),
+            contentRect: NSRect(x: 0, y: 0, width: 360 * settings.panelZoom,
+                                height: settings.panelHeight * settings.panelZoom),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -186,8 +208,9 @@ final class PanelController {
         // `.resizable` is deliberately NOT set. It was there for the height
         // drag and it brought AppKit's zoom with it. The grip in the panel's
         // own footer does the drag now, on a 12 pt target.
-        panel.minSize = NSSize(width: 360, height: 320)
-        panel.maxSize = NSSize(width: 360, height: 900)
+        let z = CGFloat(settings.panelZoom)
+        panel.minSize = NSSize(width: 360 * z, height: 320 * z)
+        panel.maxSize = NSSize(width: 360 * z, height: 900 * z)
 
         return panel
     }
@@ -213,7 +236,9 @@ final class PanelController {
     private func commitDraggedHeight() {
         guard let panel else { return }
         dragStartHeight = nil
-        settings.panelHeight = Double(panel.frame.height)
+        // Stored unscaled. The window is zoom * height, so persisting the
+        // window's own height would multiply the zoom in again on next launch.
+        settings.panelHeight = Double(panel.frame.height) / settings.panelZoom
     }
 
     // MARK: - Positioning

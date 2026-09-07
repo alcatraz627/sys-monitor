@@ -165,6 +165,37 @@ func runSelfTest() -> Int32 {
                                                        memWarn: 0.70, memCritical: 0.95),
           "got \(s2.severityThresholds)")
 
+    print("SettingsStore — panel zoom bounds and snapping")
+    let z0 = freshStore("selftest.zoom.empty")
+    check("zoom defaults to 100%", z0.panelZoom == 1.0, "got \(z0.panelZoom)")
+    check("zoom clamps above the ceiling", SettingsStore.clampZoom(9.0) == 2.0,
+          "got \(SettingsStore.clampZoom(9.0))")
+    check("zoom clamps below the floor", SettingsStore.clampZoom(0.01) == 0.5,
+          "got \(SettingsStore.clampZoom(0.01))")
+    check("zoom snaps to the nearest 10%",
+          abs(SettingsStore.clampZoom(1.234) - 1.2) < 0.0001,
+          "got \(SettingsStore.clampZoom(1.234))")
+    // Stepping must stop at the rails rather than drift past them, and must
+    // report that it did nothing so a held key is not a silent no-op.
+    let zs = freshStore("selftest.zoom.step")
+    zs.panelZoom = 2.0
+    check("stepping up at the ceiling does not move", zs.stepZoom(1) == false)
+    check("zoom is still the ceiling after a refused step", zs.panelZoom == 2.0,
+          "got \(zs.panelZoom)")
+    zs.panelZoom = 0.5
+    check("stepping down at the floor does not move", zs.stepZoom(-1) == false)
+    zs.panelZoom = 1.0
+    check("a step moves exactly one increment", zs.stepZoom(1) && abs(zs.panelZoom - 1.1) < 0.0001,
+          "got \(zs.panelZoom)")
+    // A stale or hand-edited value between steps is snapped on load, not kept.
+    let zsuite = "selftest.zoom.rt"
+    let zd = UserDefaults(suiteName: zsuite)!
+    zd.removePersistentDomain(forName: zsuite)
+    zd.set(1.37, forKey: "panelZoom")
+    check("a stored off-step value is snapped on load",
+          abs(SettingsStore(defaults: zd).panelZoom - 1.4) < 0.0001,
+          "got \(SettingsStore(defaults: zd).panelZoom)")
+
     print("SettingsStore — alert config persistence (6.1 / 9.5)")
     let ac0 = freshStore("selftest.alert.empty")
     check("alert config defaults to OFF", ac0.alertConfig == .defaults, "got \(ac0.alertConfig)")

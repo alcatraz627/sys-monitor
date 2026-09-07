@@ -255,8 +255,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         editHolder.submenu = edit
+
+        // Zoom rides the same hidden menu. A borderless nonactivating panel
+        // gets its key equivalents through NSApp.mainMenu, so this is where
+        // Cmd +/- has to live. "=" is the unshifted key on the + character, and
+        // "+" is added too because keyboards differ about which one arrives.
+        let viewHolder = NSMenuItem()
+        mainMenu.addItem(viewHolder)
+        let view = NSMenu(title: "View")
+        view.addItem(withTitle: "Zoom In", action: #selector(zoomIn), keyEquivalent: "=")
+        view.addItem(withTitle: "Zoom In", action: #selector(zoomIn), keyEquivalent: "+")
+        view.addItem(withTitle: "Zoom Out", action: #selector(zoomOut), keyEquivalent: "-")
+        view.addItem(withTitle: "Actual Size", action: #selector(zoomReset), keyEquivalent: "0")
+        for item in view.items { item.target = self }
+        viewHolder.submenu = view
         NSApp.mainMenu = mainMenu
     }
+
+    @objc private func zoomIn()    { settings?.stepZoom(1) }
+    @objc private func zoomOut()   { settings?.stepZoom(-1) }
+    @objc private func zoomReset() { settings?.panelZoom = 1.0 }
 
     @objc private func displayWentDark() {
         panelController?.close()

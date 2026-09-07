@@ -288,6 +288,9 @@ MainActor.assumeIsolated {
             /// only ever render surfaces as if the user had already opened
             /// them, and could not fail on a default that hides one.
             var storedDefaults = false
+            /// Panel magnification. The zoom scales a finished layout, so the
+            /// thing to look at in these renders is whether text stays crisp.
+            var zoom: Double = 1.0
         }
         let calm = ReclaimRate(stallPagesPerSec: 0, evictPagesPerSec: 0)
         let busy = ReclaimRate(stallPagesPerSec: 640, evictPagesPerSec: 900)
@@ -329,6 +332,12 @@ MainActor.assumeIsolated {
                                snap: snapshot(reclaim: calm, severity: .normal, pressure: .normal,
                                               warm: false),
                                expanded: [.cpu], sort: .cpu))
+        cases.append(PanelCase(name: "zoom-50",
+                               snap: snapshot(reclaim: calm, severity: .normal, pressure: .normal),
+                               expanded: [], sort: .cpu, zoom: 0.5))
+        cases.append(PanelCase(name: "zoom-200",
+                               snap: snapshot(reclaim: calm, severity: .normal, pressure: .normal),
+                               expanded: [], sort: .cpu, zoom: 2.0))
 
         for c in cases {
             let name = c.name, snap = c.snap, expanded = c.expanded, sort = c.sort
@@ -342,6 +351,7 @@ MainActor.assumeIsolated {
                 settings.expandedSections = expanded
                 settings.defaultSort = sort
             }
+            settings.panelZoom = c.zoom
             let panelState = PanelState()
 
             let root = PanelRootView(onShowSettings: {})
@@ -352,7 +362,9 @@ MainActor.assumeIsolated {
 
             // Parked at -20000: rendered by the window server, visible to
             // nobody. orderFront on a .prohibited app cannot activate it.
-            let window = NSWindow(contentRect: NSRect(x: -20000, y: -20000, width: 360, height: 720),
+            let window = NSWindow(contentRect: NSRect(x: -20000, y: -20000,
+                                                      width: 360 * c.zoom,
+                                                      height: 720 * c.zoom),
                                   styleMask: [.borderless], backing: .buffered, defer: false)
             window.contentViewController = host
             window.backgroundColor = .clear
@@ -360,10 +372,19 @@ MainActor.assumeIsolated {
             window.displayIfNeeded()
             RunLoop.main.run(until: Date().addingTimeInterval(0.6))
 
-            guard let view = window.contentView else { continue }
+            guard let view = window.contentView else {
+                FileHandle.standardError.write(Data("probe-panel: \(name): no content view\n".utf8))
+                probeFailures += 1
+                continue
+            }
             view.layoutSubtreeIfNeeded()
             let bounds = view.bounds
-            guard let rep = view.bitmapImageRepForCachingDisplay(in: bounds) else { continue }
+            guard let rep = view.bitmapImageRepForCachingDisplay(in: bounds) else {
+                FileHandle.standardError.write(
+                    Data("probe-panel: \(name): no bitmap for bounds \(bounds.size)\n".utf8))
+                probeFailures += 1
+                continue
+            }
             view.cacheDisplay(in: bounds, to: rep)
 
             // Composite onto a mid grey. The panel's material is vibrancy,

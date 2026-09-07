@@ -82,6 +82,7 @@ public final class SettingsStore: ObservableObject {
     private static let kPinnedPids = "pinnedPids"
     private static let kExpanded   = "expandedSections"
     private static let kHistoryWindow = "historyWindowSeconds"
+    private static let kPanelZoom  = "panelZoom"
     private static let kCompactGlyph = "compactGlyph"
     private static let kGroupProcs = "groupProcesses"
     private static let kAdaptToDisplay = "adaptGlyphToDisplay"
@@ -160,6 +161,37 @@ public final class SettingsStore: ObservableObject {
     /// to the coordinator's ring buffers; widening keeps existing points.
     @Published public var historyWindowSeconds: Double {
         didSet { defaults.set(historyWindowSeconds, forKey: Self.kHistoryWindow) }
+    }
+
+    /// Panel magnification, 0.5…2.0 in steps of 0.1. One number scaling the
+    /// whole panel, so proportions cannot drift: scaling the design tokens
+    /// instead would leave every raw literal in the view tree at its old size.
+    @Published public var panelZoom: Double {
+        didSet {
+            let clamped = Self.clampZoom(panelZoom)
+            if clamped != panelZoom { panelZoom = clamped; return }
+            defaults.set(panelZoom, forKey: Self.kPanelZoom)
+        }
+    }
+
+    public static let zoomRange: ClosedRange<Double> = 0.5...2.0
+    public static let zoomStep: Double = 0.1
+
+    /// Snap to the nearest 10% and hold inside the range, so a stale stored
+    /// value or a rapid keyboard repeat cannot land between steps.
+    public static func clampZoom(_ v: Double) -> Double {
+        let snapped = (v / zoomStep).rounded() * zoomStep
+        return min(max(snapped, zoomRange.lowerBound), zoomRange.upperBound)
+    }
+
+    /// Step the zoom by n increments. Returns whether it actually moved, so a
+    /// key press at the limit can be a no-op rather than a silent one.
+    @discardableResult
+    public func stepZoom(_ n: Int) -> Bool {
+        let next = Self.clampZoom(panelZoom + Double(n) * Self.zoomStep)
+        guard next != panelZoom else { return false }
+        panelZoom = next
+        return true
     }
 
     /// Panel display toggles — each gates an existing render path. All
@@ -285,6 +317,8 @@ public final class SettingsStore: ObservableObject {
             memCritical: thr(Self.kMemCrit, d.memCritical))
         let storedWindow = (defaults.object(forKey: Self.kHistoryWindow) as? Double) ?? 60
         self.historyWindowSeconds = min(max(storedWindow, 60), 300)
+        let storedZoom = (defaults.object(forKey: Self.kPanelZoom) as? Double) ?? 1.0
+        self.panelZoom = Self.clampZoom(storedZoom)
         self.compactGlyph = (defaults.object(forKey: Self.kCompactGlyph) as? Bool) ?? false
         self.groupProcesses = (defaults.object(forKey: Self.kGroupProcs) as? Bool) ?? false
         self.adaptGlyphToDisplay = (defaults.object(forKey: Self.kAdaptToDisplay) as? Bool) ?? true
@@ -365,6 +399,7 @@ public final class SettingsStore: ObservableObject {
         pinnedPids = []
         expandedSections = []
         historyWindowSeconds = 60
+        panelZoom = 1.0
         compactGlyph = false
         groupProcesses = false
         adaptGlyphToDisplay = true
