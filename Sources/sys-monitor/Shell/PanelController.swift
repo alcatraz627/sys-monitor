@@ -89,6 +89,10 @@ final class PanelController {
         self.panel = panel
         anchor(panel: panel)
         panel.makeKeyAndOrderFront(nil)
+        // Anchoring used the persisted height. If the content needs more, grow
+        // now rather than showing a clipped first frame and correcting on the
+        // next layout pass.
+        panel.fitToContentHeight()
         coordinator.enterOpenTier()
         installClickMonitor()
         installVisibilityObservers(panel: panel)
@@ -188,6 +192,9 @@ final class PanelController {
         // own footer does the drag now, on a 12 pt target.
         panel.minSize = NSSize(width: 360, height: 320)
         panel.maxSize = NSSize(width: 360, height: 900)
+        // The persisted height is where the panel OPENS, not a cap. Content
+        // taller than it grows the window instead of being clipped by it.
+        panel.fitsContentHeight = true
 
         return panel
     }
@@ -203,7 +210,11 @@ final class PanelController {
         guard let panel else { return }
         let start = dragStartHeight ?? panel.frame.height
         dragStartHeight = start
-        let target = min(max(start + translationY, panel.minSize.height), panel.maxSize.height)
+        // The floor is whichever is taller, the window minimum or the content.
+        // Dragging below the content clips it exactly the way opening short did.
+        let contentFloor = panel.contentViewController?.view.fittingSize.height ?? 0
+        let floor = max(panel.minSize.height, min(contentFloor, panel.maxSize.height))
+        let target = min(max(start + translationY, floor), panel.maxSize.height)
         var r = panel.frame
         r.origin.y = r.maxY - target      // top edge stays under the menu bar
         r.size.height = target

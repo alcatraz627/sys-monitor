@@ -671,6 +671,9 @@ MainActor.assumeIsolated {
         panel.setFrame(NSRect(x: -20000, y: -20000, width: 360, height: chosenHeight),
                        display: true)
         if !regress { panel.keepsTopEdge = true }
+        // The shipped panel sets this; without it here the probe would measure a
+        // window this app never creates.
+        if !CommandLine.arguments.contains("--break-fit") { panel.fitsContentHeight = true }
         let topBefore = panel.frame.maxY
         RunLoop.main.run(until: Date().addingTimeInterval(0.5))
         let before = panel.frame.height
@@ -730,6 +733,18 @@ MainActor.assumeIsolated {
         if contentH < min(after, chosenHeight) - 1 || fitting.width < 100 || fitting.height < 100 {
             FileHandle.standardError.write(
                 Data("probe-resize: the content did not lay out to fill the window\n".utf8))
+            failed = true
+        }
+        // The other direction of the same comparison, and the one that shipped.
+        // The check above asserts content >= window, which an OVERSIZED content
+        // satisfies, so a window short of its content passed here for as long as
+        // the probe existed while the panel clipped its header off the top. Both
+        // directions or neither: this is the assertion that fails when the window
+        // stops following the content.
+        if after < fitting.height - 1 {
+            FileHandle.standardError.write(
+                Data(String(format: "probe-resize: window %.0f is shorter than content %.0f; the panel clips\n",
+                            after, fitting.height).utf8))
             failed = true
         }
         exit(failed ? 1 : 0)

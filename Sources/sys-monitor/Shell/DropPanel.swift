@@ -49,4 +49,49 @@ final class DropPanel: NSPanel {
         }
         super.setFrame(r, display: flag)
     }
+
+    /// Never be shorter than the content.
+    ///
+    /// SwiftUI lays the panel out at its natural height and centres it when the
+    /// window is shorter, so a window a few points short does not compress: it
+    /// cuts the CPU header off the top and the footer and the resize grip off the
+    /// bottom, and it takes the corner radius with them, because the rounded
+    /// shape belongs to the content and its corners end up outside the window.
+    /// That is what shipped, and `--probe-resize` could not see it: its content
+    /// check asserts content >= window, which an oversized content satisfies.
+    ///
+    /// Growing only. A section that closes leaves the room behind rather than
+    /// snapping the window shut under the pointer, and the footer grip can still
+    /// drag the panel taller than its content.
+    var fitsContentHeight = false
+
+    private var isFittingContent = false
+
+    func fitToContentHeight() {
+        guard fitsContentHeight, !inLiveResize, !isFittingContent,
+              let content = contentViewController?.view else { return }
+        // The ceiling is the screen, not `maxSize`. AppKit does not apply
+        // maxSize to a programmatic setFrame, so the window already grows past
+        // 900 on a tall display and the constant was describing nothing. What
+        // it must never do is grow past what the display can show, which only
+        // moves the clip from the window to the screen edge.
+        let ceiling = screen?.visibleFrame.height ?? maxSize.height
+        let need = min(content.fittingSize.height, ceiling)
+        guard need > frame.height + 0.5 else { return }
+        isFittingContent = true
+        defer { isFittingContent = false }
+        var r = frame
+        r.origin.y = r.maxY - need
+        r.size.height = need
+        setFrame(r, display: true)
+    }
+
+    /// AppKit runs this once per update cycle for a window that needs layout,
+    /// which is the point at which SwiftUI has published a new content size and
+    /// `fittingSize` is answerable. Doing the fit here rather than on a metrics
+    /// tick means an expanded section is measured on the pass that expanded it.
+    override func layoutIfNeeded() {
+        super.layoutIfNeeded()
+        fitToContentHeight()
+    }
 }
