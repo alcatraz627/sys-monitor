@@ -45,32 +45,6 @@ final class PanelController {
     var onShowSettings: (() -> Void)?
 
     private var pinSync: AnyCancellable?
-    private var zoomSync: AnyCancellable?
-    private weak var hostView: NSView?
-
-    /// Rasterise the panel's layers at the size they are finally drawn at.
-    ///
-    /// `scaleEffect` is a layer transform: Core Animation rasterises at the
-    /// layer's `contentsScale` and then stretches, so at 200% on a Retina
-    /// display the 2x raster is spread over four times the area and the panel
-    /// reads coarse. Multiplying `contentsScale` by the zoom makes the text
-    /// rasterise at the final size instead.
-    ///
-    /// UNVERIFIED on this machine: the test rig reports backingScaleFactor 1.0,
-    /// where there is no Retina raster to lose and both render paths measure
-    /// identical. Confirmed only on a 2x display.
-    private func applyRasterScale() {
-        guard let v = hostView else { return }
-        let backing = panel?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
-        let target = backing * CGFloat(settings.panelZoom)
-        v.wantsLayer = true
-        func walk(_ layer: CALayer) {
-            layer.contentsScale = target
-            layer.rasterizationScale = target
-            layer.sublayers?.forEach(walk)
-        }
-        if let l = v.layer { walk(l) }
-    }
 
     init(store: MetricsStore, settings: SettingsStore, coordinator: SamplingCoordinator) {
         self.store = store
@@ -81,30 +55,6 @@ final class PanelController {
         pinSync = panelState.$isPinned.dropFirst().sink { [weak settings] pinned in
             settings?.panelPinned = pinned
         }
-        // The view scales itself; the window has to follow, because its width
-        // and its size bounds are in points and would otherwise clip the zoomed
-        // content or leave a margin around it.
-        zoomSync = settings.$panelZoom.dropFirst().sink { [weak self] z in
-            Task { @MainActor [weak self] in self?.applyZoom(z) }
-        }
-    }
-
-    /// Resize the window to the zoomed layout, keeping the top edge and the
-    /// horizontal anchor under the status item.
-    private func applyZoom(_ z: Double) {
-        guard let panel else { return }
-        let w = 360 * CGFloat(z)
-        panel.minSize = NSSize(width: w, height: 320 * CGFloat(z))
-        panel.maxSize = NSSize(width: w, height: 900 * CGFloat(z))
-        var r = panel.frame
-        let h = min(max(r.height, panel.minSize.height), panel.maxSize.height)
-        r.origin.y = r.maxY - h
-        r.size = NSSize(width: w, height: h)
-        panel.setFrame(r, display: true)
-        anchor(panel: panel)
-        // SwiftUI rebuilds layers as the tree changes, so the raster scale is
-        // re-applied on every zoom rather than set once at construction.
-        applyRasterScale()
     }
 
     /// Close the panel without dismissing-via-event. Used by the settings
@@ -202,8 +152,8 @@ final class PanelController {
 
     private func makePanel() -> DropPanel {
         let panel = DropPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 360 * settings.panelZoom,
-                                height: settings.panelHeight * settings.panelZoom),
+            contentRect: NSRect(x: 0, y: 0, width: 360,
+                                height: settings.panelHeight),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -223,10 +173,7 @@ final class PanelController {
         .environmentObject(store)
         .environmentObject(settings)
         .environmentObject(panelState)
-        let host = NSHostingController(rootView: root)
-        panel.contentViewController = host
-        hostView = host.view
-        applyRasterScale()
+        panel.contentViewController = NSHostingController(rootView: root)
         panel.onCancel = { [weak self] in
             guard let self, !self.isPinned else { return }
             self.close()
@@ -239,9 +186,8 @@ final class PanelController {
         // `.resizable` is deliberately NOT set. It was there for the height
         // drag and it brought AppKit's zoom with it. The grip in the panel's
         // own footer does the drag now, on a 12 pt target.
-        let z = CGFloat(settings.panelZoom)
-        panel.minSize = NSSize(width: 360 * z, height: 320 * z)
-        panel.maxSize = NSSize(width: 360 * z, height: 900 * z)
+        panel.minSize = NSSize(width: 360, height: 320)
+        panel.maxSize = NSSize(width: 360, height: 900)
 
         return panel
     }
@@ -267,9 +213,7 @@ final class PanelController {
     private func commitDraggedHeight() {
         guard let panel else { return }
         dragStartHeight = nil
-        // Stored unscaled. The window is zoom * height, so persisting the
-        // window's own height would multiply the zoom in again on next launch.
-        settings.panelHeight = Double(panel.frame.height) / settings.panelZoom
+        settings.panelHeight = Double(panel.frame.height)
     }
 
     // MARK: - Positioning

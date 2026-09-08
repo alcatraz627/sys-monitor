@@ -145,19 +145,6 @@ struct SettingsView: View {
                 }
                 .help("How much history the sparklines keep. Widening fills in over time; narrowing trims immediately.")
 
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack {
-                        Text("Panel zoom")
-                        Spacer()
-                        Text("\(Int((settings.panelZoom * 100).rounded()))%")
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                    }
-                    Slider(value: $settings.panelZoom,
-                           in: SettingsStore.zoomRange,
-                           step: SettingsStore.zoomStep)
-                }
-                .help("Magnifies the whole panel, 50% to 200% in steps of 10. Also on ⌘+ and ⌘−, with ⌘0 for actual size.")
             }
 
             Section("Process list") {
