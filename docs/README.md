@@ -13,6 +13,7 @@ project was built from — accurate as history, but predates v2/v2.1 features) a
 |-----|------------|
 | [00-overview.md](00-overview.md) | **Current** architecture + per-module map + feature→file index |
 | [14-panel-spec.md](14-panel-spec.md) | **Current** product spec of the panel: what each surface is, the principles behind the flow, what it is for, and the known divergences |
+| [15-zoom.md](15-zoom.md) | **Current** why panel zoom is off, the seven approaches that failed and what killed each, and the metric-scaling path that remains |
 | [09-manual-checks.md](09-manual-checks.md) | The human-glance checklist — pixel/interaction items automated checks can't cover |
 | [11-perf-audit.md](11-perf-audit.md) | Measured footprint + ranked findings (2026-06-18) |
 
