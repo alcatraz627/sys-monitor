@@ -106,17 +106,7 @@ struct PanelRootView: View {
         //
         // minWidth/minHeight exist because a bare GeometryReader reports a zero
         // ideal and NSHostingController then shrinks the window to nothing.
-        GeometryReader { geo in
-            panelBody()
-                .frame(width: 360,
-                       height: max(geo.size.height / settings.panelZoom, 1),
-                       alignment: .top)
-                .scaleEffect(settings.panelZoom, anchor: .topLeading)
-                .frame(width: geo.size.width, height: geo.size.height,
-                       alignment: .topLeading)
-        }
-        .frame(minWidth: 360 * settings.panelZoom,
-               minHeight: 320 * settings.panelZoom)
+        zoomedBody
         .background(
             // Vibrant material so the dropdown has the standard menu-bar
             // feel even though we own the window chrome.
@@ -124,6 +114,35 @@ struct PanelRootView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 10))
         )
         .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    /// At 100% the panel reports its own natural height, which is what lets the
+    /// window grow when a section opens. Filling the container instead cost that:
+    /// every case measured the window's height rather than its own (476 and 545
+    /// per case before, a flat 720 after), so an expansion could only squeeze the
+    /// process list and then clip.
+    ///
+    /// Zoom still fills the container, because scaleEffect does not change the
+    /// size a view reports and there is no other way to make the window follow.
+    /// That path remains wrong at every zoom but 1.0; the fix for it is metric
+    /// scaling, not this.
+    @ViewBuilder
+    private var zoomedBody: some View {
+        if settings.panelZoom == 1.0 {
+            panelBody()
+        } else {
+            GeometryReader { geo in
+                panelBody()
+                    .frame(width: 360,
+                           height: max(geo.size.height / settings.panelZoom, 1),
+                           alignment: .top)
+                    .scaleEffect(settings.panelZoom, anchor: .topLeading)
+                    .frame(width: geo.size.width, height: geo.size.height,
+                           alignment: .topLeading)
+            }
+            .frame(minWidth: 360 * settings.panelZoom,
+                   minHeight: 320 * settings.panelZoom)
+        }
     }
 
     @ViewBuilder
