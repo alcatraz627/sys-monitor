@@ -799,6 +799,68 @@ func runSelfTest() -> Int32 {
               ProcGroup.group([p(60, 60, "z", 1)]).count == 1)
         check("empty input yields no groups", ProcGroup.group([]).isEmpty)
 
+        // Live: a process that burns a known amount of CPU must be seen to
+        // have burned that much. Guards the unit of the kernel's counter,
+        // which is mach ticks and not nanoseconds on Apple Silicon.
+        do {
+            let me = getpid()
+            func ownCpuNs() -> UInt64? {
+                (try? ProcessSampler().read())?.first { $0.pid == me }?.cpuTimeNs
+            }
+            func clockNs() -> UInt64 { clock_gettime_nsec_np(CLOCK_PROCESS_CPUTIME_ID) }
+            if let before = ownCpuNs() {
+                let clockBefore = clockNs()
+                let until = monoSeconds() + 0.4
+                var spin: UInt64 = 0
+                while monoSeconds() < until { spin &+= 1 }
+                let trueNs = Double(clockNs() - clockBefore)
+                let seenNs = Double((ownCpuNs() ?? before) - before)
+                let ratio = trueNs > 0 ? seenNs / trueNs : 0
+                check("per-process CPU time is in real nanoseconds",
+                      ratio > 0.8 && ratio < 1.25,
+                      String(format: "sampler saw %.0f%% of the CPU this process used", ratio * 100))
+            }
+        }
+
+        // System processes come from ps. The parser is fed the shapes ps
+        // really prints, including a name with spaces and a junk line.
+        do {
+            let text = """
+                1     0 464:21.60  25792 launchd
+              428     1 6304:26.05 337440 WindowServer
+              900     1   0:01.35   6096 Google Chrome Helper
+              933     1 292:29.93 118768 sys-monitor
+            not a process line
+            """
+            let rows = RestrictedProcessReader.parse(text, excluding: [933])
+            check("ps rows parse, minus the pid already known and the junk line",
+                  rows.map { $0.pid } == [1, 428, 900], "got \(rows.map { $0.pid })")
+            check("a name with spaces survives whole",
+                  rows.last?.name == "Google Chrome Helper", rows.last?.name ?? "nil")
+            check("ps CPU time becomes nanoseconds",
+                  rows.first?.cpuTimeNs == 27_861_600_000_000,
+                  "\(rows.first?.cpuTimeNs ?? 0)")
+            check("ps memory is kilobytes, stored as bytes",
+                  rows.first?.residentBytes == 25792 * 1024)
+            check("a ps row is marked as a system process",
+                  rows.allSatisfy { $0.isRestricted })
+            check("hours and days in a CPU time are honoured",
+                  RestrictedProcessReader.cpuTimeNs("1-01:01:01.50") == 90_061_500_000_000
+                  && RestrictedProcessReader.cpuTimeNs("1:02:03") == 3_723_000_000_000)
+            check("a malformed CPU time is refused, not read as zero",
+                  RestrictedProcessReader.cpuTimeNs("abc") == nil)
+
+            // Live: ps must supply processes the kernel refuses us directly.
+            let own = Set(((try? ProcessSampler().read()) ?? []).map { $0.pid })
+            let system = RestrictedProcessReader().read(excluding: own)
+            check("ps supplies system processes the app cannot read itself",
+                  system.contains { $0.pid == 1 && $0.name == "launchd" },
+                  "\(system.count) system processes")
+            check("no process is listed twice",
+                  own.isDisjoint(with: Set(system.map { $0.pid })))
+            print("  \(own.count) readable directly, \(system.count) more through ps")
+        }
+
         // Live: grouping must not lose or duplicate a process.
         if let raws = try? ProcessSampler().read(), !raws.isEmpty {
             let live = raws.map { ProcSample(raw: $0, cpu: 0, diskBps: 0, netBps: 0) }

@@ -90,6 +90,30 @@ func runProbe() {
         print("[disk] verdict: DEMOTE to v2 per N8 (sampler will report .unavailable, NetDiskRow hides disk)")
     }
 
+    // -- Busiest processes, for comparison against `top` ---------------------
+    print(String(repeating: "─", count: 56))
+    func readAll() -> [ProcRaw] {
+        let own = (try? ProcessSampler().read()) ?? []
+        return own + RestrictedProcessReader().read(excluding: Set(own.map { $0.pid }))
+    }
+    let first = readAll()
+    let t0 = monoSeconds()
+    Thread.sleep(forTimeInterval: 2.0)
+    let second = readAll()
+    let window = monoSeconds() - t0
+    let before = Dictionary(first.map { ($0.pid, $0.cpuTimeNs) }, uniquingKeysWith: { a, _ in a })
+    let busiest = second.compactMap { p -> (ProcRaw, Double)? in
+        guard let b = before[p.pid], p.cpuTimeNs >= b else { return nil }
+        return (p, Double(p.cpuTimeNs - b) / (window * 1_000_000_000) * 100)
+    }.sorted { $0.1 > $1.1 }
+    let total = busiest.reduce(0) { $0 + $1.1 }
+    print(String(format: "[proc] %d processes (%d via ps), summed CPU %.0f%% of one core over %.2fs",
+                 second.count, second.filter { $0.isRestricted }.count, total, window))
+    for (p, pct) in busiest.prefix(8) {
+        print(String(format: "[proc] %6d  %5.1f%%  %6d MB  %@%@", p.pid, pct,
+                     p.displayMemoryBytes >> 20, p.name, p.isRestricted ? "  (system)" : ""))
+    }
+
     print(String(repeating: "─", count: 56))
     print("probe done")
 }

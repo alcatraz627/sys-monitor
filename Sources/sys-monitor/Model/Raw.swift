@@ -123,6 +123,10 @@ public struct ProcRaw: Sendable {
     /// like the disk counter, so watts is a delta over elapsed. Zero when
     /// rusage was denied, which ranks the process last in a power sort.
     public let energyNanojoules: UInt64
+    /// True for a process the kernel will not let this app inspect, read
+    /// through `ps` instead. Its CPU time and resident memory are real; its
+    /// disk, energy and footprint are unknown, not zero.
+    public var isRestricted: Bool = false
 
     /// The memory figure to display: footprint when it was readable, else
     /// RSS. Kept here rather than at the call site so every consumer makes

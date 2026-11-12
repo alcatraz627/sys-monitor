@@ -31,6 +31,7 @@ public final class SamplingCoordinator: @unchecked Sendable {
     private let netSampler  = NetworkSampler()
     private let diskSampler = DiskSampler()
     private let procSampler = ProcessSampler()
+    private let restrictedReader = RestrictedProcessReader()
     private let netMonitor = PerProcessNetworkMonitor()
     private let powerMonitor = PowerMonitor()
     private let batterySampler = BatterySampler()
@@ -752,7 +753,7 @@ public final class SamplingCoordinator: @unchecked Sendable {
         let sampleInterval = openCadenceSeconds * 2
         let isGap = (elapsed <= 0) || (elapsed > sampleInterval * gapMultiplier)
 
-        let raws: [ProcRaw]
+        var raws: [ProcRaw]
         // Per-process %CPU is Δcpu-time / Δwall — the same stale-baseline
         // inflation as NET/DISK applies, so a failed enumeration drops the
         // whole prev map and the next success re-baselines.
@@ -765,6 +766,8 @@ public final class SamplingCoordinator: @unchecked Sendable {
             return .unavailable
         }
         lastProcSampleTime = now
+        // Add the system processes the kernel will not let this app read.
+        raws += restrictedReader.read(excluding: Set(raws.map { $0.pid }))
 
         // Per-pid cumulative network bytes from the private-framework
         // monitor (empty when it's unavailable). Snapshot once per tick,

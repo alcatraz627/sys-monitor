@@ -213,7 +213,7 @@ struct PanelRootView: View {
                           onTap: { settings.toggleSection(.mem) }) {
                 Text("MEM").font(DesignTokens.numericFont(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
-                    .explain("Used memory (active + wired + compressed); sparkline shows the last \(Int(settings.historyWindowSeconds)) s, auto-scaled to the corner labels")
+                    .explain("Used memory (app + wired + compressed, as Activity Monitor counts it); sparkline shows the last \(Int(settings.historyWindowSeconds)) s, auto-scaled to the corner labels")
                 Spacer()
                 Text(memValueText)
                     .font(DesignTokens.numericFont(size: 12, weight: .medium))
@@ -446,7 +446,7 @@ struct PanelRootView: View {
             .overlay(alignment: .top) {
                 Rectangle().fill(Color.secondary.opacity(0.15)).frame(height: 0.5)
             }
-            .explain("The list shows the top processes by the current sort, out of the ones this app can see. Roughly a third of a typical machine's processes — launchd, WindowServer, other users' daemons — answer no request for their task info, so they never appear here at all. ps and top see them because they ship with an Apple entitlement an ad-hoc-signed app cannot have; it is not a matter of running as root. Activity Monitor will always list more.")
+            .explain("The list shows the top processes by the current sort. System processes such as WindowServer and launchd are included with their CPU and resident memory; macOS does not let this app read their disk, network or power use, so those show a dash.")
         }
     }
 
@@ -1465,7 +1465,7 @@ private struct ThroughputCell: View {
                 }
                 .padding(.top, 1)
                 .padding(.bottom, DesignTokens.Space.s)
-                .explain("The processes behind this number, busiest first. Only processes this app can see; the coverage row says how many it cannot.")
+                .explain("The processes behind this number, busiest first. System processes are not counted here, because macOS does not let this app read their disk or network use.")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1686,6 +1686,11 @@ private struct ProcessList: View {
 
     /// Third-column value text — whatever metric the list is sorted by.
     private func thirdColumnText(_ p: ProcSample) -> String {
+        // A system process read through ps has no disk, network or power
+        // reading. A dash says "not measured"; 0 would say "idle".
+        if p.isRestricted, sortBy == .disk || sortBy == .net || sortBy == .pwr {
+            return "—"
+        }
         switch sortBy {
         case .disk: return formatBps(p.diskBps, unit: settings.throughputUnit)
         case .net:  return formatBps(p.netBps, unit: settings.throughputUnit)

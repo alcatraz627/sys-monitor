@@ -4,9 +4,9 @@ import Darwin
 /// Enumerates running processes and reads cumulative CPU time + resident
 /// size for each. Uses `proc_listpids` (two-call sizing) then a single
 /// `proc_pidinfo(PROC_PIDTASKINFO)` per PID — `pti_total_user +
-/// pti_total_system` is the canonical CPU-time pair and lives in
-/// nanoseconds, so the coordinator can delta straight against wall-clock
-/// elapsed seconds.
+/// pti_total_system` is the canonical CPU-time pair. The kernel reports it
+/// in mach ticks; it is converted to nanoseconds here so the coordinator can
+/// delta straight against wall-clock elapsed seconds.
 ///
 /// `proc_pid_rusage` IS used (once per PID) for the cumulative disk-I/O bytes
 /// that feed the per-process disk rate — there is no `PROC_PIDTASKINFO` field
@@ -27,13 +27,29 @@ import Darwin
 /// typical desktop return EPERM from `PROC_PIDTASKINFO`, including launchd
 /// and WindowServer; `ps` and `top` see them because they carry
 /// `com.apple.system-task-ports.read`, which an ad-hoc-signed binary cannot.
-/// The list is therefore partial by construction, and the UI says so.
+/// `RestrictedProcessReader` supplies the rest by asking `ps`.
 ///
 /// Vanished / privilege-denied PIDs are simply skipped (the `proc_pidinfo`
 /// race between listing and reading is normal on a busy system; skipping
 /// is the documented fix, not retrying).
 public struct ProcessSampler: Sampler {
     public init() {}
+
+    /// Nanoseconds per mach tick, as numerator and denominator. Fixed for the
+    /// life of the machine, so it is read once.
+    private static let timebase: (numer: UInt64, denom: UInt64) = {
+        var tb = mach_timebase_info_data_t()
+        mach_timebase_info(&tb)
+        return (UInt64(max(tb.numer, 1)), UInt64(max(tb.denom, 1)))
+    }()
+
+    /// Convert a mach tick count to nanoseconds. Splits the division so a
+    /// long-lived process's tick count cannot overflow on the multiply.
+    static func machTicksToNs(_ ticks: UInt64) -> UInt64 {
+        let (n, d) = timebase
+        if n == d { return ticks }
+        return (ticks / d) &* n &+ (ticks % d) &* n / d
+    }
 
     public func read() throws -> [ProcRaw] {
         // Size probe — passing NULL buffer with 0 size returns the number
@@ -95,7 +111,11 @@ public struct ProcessSampler: Sampler {
             }
             let name: String = (nameLen > 0) ? String(cString: nameBuf) : ""
 
-            let cpuTimeNs = info.pti_total_user &+ info.pti_total_system
+            // The kernel reports these in mach ticks, not nanoseconds. On Intel
+            // the two are the same; on Apple Silicon a tick is 125/3 ns, so
+            // reading them as nanoseconds shows every process at 1/42 of its
+            // real CPU.
+            let cpuTimeNs = Self.machTicksToNs(info.pti_total_user &+ info.pti_total_system)
 
             // Lifetime disk bytes via rusage — feeds the per-process disk
             // rate. Denied (other-user) pids report 0 and simply rank at

@@ -94,6 +94,9 @@ public struct ProcSample: Sendable, Equatable {
     /// cumulative `ri_energy_nj` counter. 0 for pids whose rusage is denied,
     /// which ranks them last in a power sort, same as disk.
     public let watts: Double
+    /// True for a system process read through `ps`: CPU and resident memory
+    /// are real, while disk, network and power are unknown rather than zero.
+    public var isRestricted: Bool = false
 
     /// Build from a raw reading. This is the only path the coordinator
     /// uses, so which memory quantity reaches the UI is decided here rather
@@ -110,6 +113,7 @@ public struct ProcSample: Sendable, Equatable {
         self.watts = watts
         self.diskBps = diskBps
         self.netBps = netBps
+        self.isRestricted = raw.isRestricted
     }
 
     /// Direct construction, for fixtures and tests.
