@@ -16,6 +16,7 @@ project was built from — accurate as history, but predates v2/v2.1 features) a
 | [15-zoom.md](15-zoom.md) | **Current** why panel zoom is off, the seven approaches that failed and what killed each, and the metric-scaling path that remains |
 | [09-manual-checks.md](09-manual-checks.md) | The human-glance checklist — pixel/interaction items automated checks can't cover |
 | [11-perf-audit.md](11-perf-audit.md) | Measured footprint + ranked findings (2026-06-18) |
+| [17-audit-2026-11.md](17-audit-2026-11.md) | Accuracy and usability audit, 2026-11-12, with the widget's state |
 
 Runtime regression coverage is the binary itself: `sys-monitor --self-test`
 (math, settings persistence, sampler invariants, alert state machine) and the

@@ -850,6 +850,32 @@ func runSelfTest() -> Int32 {
             check("a malformed CPU time is refused, not read as zero",
                   RestrictedProcessReader.cpuTimeNs("abc") == nil)
 
+            // Footprints for system processes come from top.
+            let topText = """
+            Processes: 1062 total, 2 running
+            PhysMem: 39G used (5697M wired, 891M compressor), 24G unused.
+
+            PID    MEM
+            428    1336M+
+            1      25M
+            900    8096K-
+            77     2G
+            """
+            let mem = RestrictedProcessReader.parseTopMemory(topText)
+            let expectedMem: [Int32: UInt64] = [428: 1_400_897_536, 1: 26_214_400,
+                                                900: 8_290_304, 77: 2_147_483_648]
+            check("top memory parses in K, M and G, ignoring the sign and the summary",
+                  mem == expectedMem, "\(mem)")
+            let withFoot = RestrictedProcessReader.parse(text, excluding: [933], footprints: mem)
+            check("a system process shows its footprint when top supplied one",
+                  withFoot.first { $0.pid == 428 }?.displayMemoryBytes == 1336 * 1_048_576)
+            check("…and falls back to resident size when it did not",
+                  rows.first { $0.pid == 428 }?.displayMemoryBytes == 337440 * 1024)
+            let liveFoot = SystemFootprintReader.read()
+            check("top reports a footprint for WindowServer-class processes live",
+                  (liveFoot[1] ?? 0) > 0 && liveFoot.count > 100,
+                  "\(liveFoot.count) pids, launchd \(liveFoot[1] ?? 0) bytes")
+
             // Live: ps must supply processes the kernel refuses us directly.
             let own = Set(((try? ProcessSampler().read()) ?? []).map { $0.pid })
             let system = RestrictedProcessReader().read(excluding: own)
@@ -859,6 +885,26 @@ func runSelfTest() -> Int32 {
             check("no process is listed twice",
                   own.isDisjoint(with: Set(system.map { $0.pid })))
             print("  \(own.count) readable directly, \(system.count) more through ps")
+        }
+
+        // Folder sizes come from du. Measure a folder of known size.
+        do {
+            check("du output parses as kilobytes",
+                  DiskUsageScanner.parse("2048\t/Users/x/Library\n") == 2048 * 1024)
+            check("junk du output is refused", DiskUsageScanner.parse("du: no such file") == nil)
+            let dir = FileManager.default.temporaryDirectory
+                .appendingPathComponent("sysmon-du-\(getpid())")
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let payload = Data(count: 4 * 1024 * 1024)
+            try? payload.write(to: dir.appendingPathComponent("blob"))
+            let measured = DiskUsageScanner.measure(dir, holder: RunningProcess()) ?? 0
+            try? FileManager.default.removeItem(at: dir)
+            check("a folder holding 4 MB measures as about 4 MB",
+                  measured >= 4 * 1024 * 1024 && measured < 5 * 1024 * 1024,
+                  "\(measured) bytes")
+            let home = FileManager.default.homeDirectoryForCurrentUser
+            check("the home directory has folders to measure",
+                  !DiskUsageScanner.topLevelFolders(of: home).isEmpty)
         }
 
         // Live: grouping must not lose or duplicate a process.

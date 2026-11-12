@@ -32,6 +32,7 @@ public final class SamplingCoordinator: @unchecked Sendable {
     private let diskSampler = DiskSampler()
     private let procSampler = ProcessSampler()
     private let restrictedReader = RestrictedProcessReader()
+    private let footprintReader = SystemFootprintReader()
     private let netMonitor = PerProcessNetworkMonitor()
     private let powerMonitor = PowerMonitor()
     private let batterySampler = BatterySampler()
@@ -767,7 +768,8 @@ public final class SamplingCoordinator: @unchecked Sendable {
         }
         lastProcSampleTime = now
         // Add the system processes the kernel will not let this app read.
-        raws += restrictedReader.read(excluding: Set(raws.map { $0.pid }))
+        raws += restrictedReader.read(excluding: Set(raws.map { $0.pid }),
+                                      footprints: footprintReader.current(now: now))
 
         // Per-pid cumulative network bytes from the private-framework
         // monitor (empty when it's unavailable). Snapshot once per tick,

@@ -183,10 +183,29 @@ degrade-to-unavailable adapter.
 
 ### 4.5 Storage, energy, load
 
-Storage is a fill bar and free space from `statfs`, refreshed each open sweep. Energy is
-system watts split CPU, GPU and ANE from IOReport. The load line carries the three load
-averages and uptime. None of these expand; the plan specifies no content for their
-expansions, so building one means designing it first.
+Storage is a fill bar and free space from `statfs`, refreshed each open sweep.
+
+Expanded, it lists the six largest folders in the home directory.
+
+- They are measured with `du` when the section is opened.
+- A finished scan is reused for 15 minutes.
+- Clicking a folder shows it in Finder. Nothing is deleted.
+
+Energy is system watts split CPU, GPU and ANE from IOReport.
+
+The load line carries the three load averages and uptime.
+
+Energy and load do not expand. The plan specifies no content for their expansions, so
+building one means designing it first.
+
+### 4.5a Who is behind a reading
+
+CPU and MEM each carry one line under the header naming their top two consumers.
+
+- A click on the line sorts the process list by that metric.
+- CPU names single processes above 5% of a core.
+- MEM names whole process trees. A browser's memory is spread across helpers that each
+  look small.
 
 ### 4.6 Processes
 
@@ -202,7 +221,24 @@ and a scrolling list.
 | Row expansion | Per-process detail: owner, threads, parent, path, icon. |
 | Kill | Real signal, from the row. |
 | Hover | Freezes order, not values, so a row does not move out from under the pointer while its numbers keep updating. |
-| Coverage | A status line states how many processes the app cannot see, rather than implying the visible set is everything. |
+| Coverage | System processes are listed, with CPU and memory. See 4.6a. |
+| Motion | Figures roll, rows slide, sections fade. See 4.6a. |
+
+### 4.6a Coverage and motion
+
+The kernel will not let the app read system processes such as WindowServer and launchd.
+They are listed through `ps` instead.
+
+- Their CPU and memory are real.
+- Their disk, network and power show a dash, meaning not measured.
+- `kernel_task` is absent. [17-audit-2026-11.md](17-audit-2026-11.md) records why.
+
+State changes move where they used to replace.
+
+- A header figure rolls to its new value.
+- A row slides to its new rank.
+- A section fades open.
+- A reopened panel holds the last list, dimmed, until a fresh one lands.
 
 ### 4.7 Panel behaviour
 

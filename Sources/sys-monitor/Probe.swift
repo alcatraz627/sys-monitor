@@ -96,9 +96,11 @@ func runProbe() {
         let own = (try? ProcessSampler().read()) ?? []
         return own + RestrictedProcessReader().read(excluding: Set(own.map { $0.pid }))
     }
+    let hostBefore = try? cpu.readOverallTicks()
     let first = readAll()
     let t0 = monoSeconds()
     Thread.sleep(forTimeInterval: 2.0)
+    let hostAfter = try? cpu.readOverallTicks()
     let second = readAll()
     let window = monoSeconds() - t0
     let before = Dictionary(first.map { ($0.pid, $0.cpuTimeNs) }, uniquingKeysWith: { a, _ in a })
@@ -109,6 +111,14 @@ func runProbe() {
     let total = busiest.reduce(0) { $0 + $1.1 }
     print(String(format: "[proc] %d processes (%d via ps), summed CPU %.0f%% of one core over %.2fs",
                  second.count, second.filter { $0.isRestricted }.count, total, window))
+    if let a = hostBefore, let b = hostAfter {
+        // What the whole machine did, in the same unit, and what no listed
+        // process accounts for: the kernel, mostly.
+        let host = RateMath.cpuUtilization(prev: a, now: b)
+            * Double(ProcessInfo.processInfo.activeProcessorCount) * 100
+        print(String(format: "[proc] machine total %.0f%% of one core; not attributed to a process: %.0f%%",
+                     host, host - total))
+    }
     for (p, pct) in busiest.prefix(8) {
         print(String(format: "[proc] %6d  %5.1f%%  %6d MB  %@%@", p.pid, pct,
                      p.displayMemoryBytes >> 20, p.name, p.isRestricted ? "  (system)" : ""))

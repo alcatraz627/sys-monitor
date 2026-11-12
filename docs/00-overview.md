@@ -104,6 +104,11 @@ dev-build self-terminator.
 | Per-core strip + the expanded heatmap | `PanelRootView.CoreStrip` (collapsed) · `CoreHeatmap` over `MetricsSnapshot.perCoreHistory` |
 | Threshold alerts | `AlertEvaluator` (logic) + `AlertNotifier` (I/O) + coordinator hook |
 | Power / battery / storage / load rows | `PowerMonitor` · `BatterySampler` · `DiskSpaceSampler` · `LoadSampler` → `PanelRootView` |
+| Largest folders under Storage | `DiskUsageScanner` → `PanelRootView.storageUsage` |
+| System processes in the list | `RestrictedProcessReader` · `SystemFootprintReader` → `SamplingCoordinator.readProcesses` |
+| Culprit line under CPU and MEM | `PanelRootView.culpritLine` |
+| Panel fed only while open | `PanelController.panelStore` |
+| Notification Centre widget | `Widget/`, built by `build.sh --install` |
 | Per-interface network split | `NetworkSampler` + `SamplingCoordinator.perInterfaceRates` |
 | Watch-a-process (pin) | `SettingsStore.pinnedPids` + `PanelRootView` ranking |
 | Kill / Focus / Copy / Reveal | `PanelRootView` (ExpandedRow) |

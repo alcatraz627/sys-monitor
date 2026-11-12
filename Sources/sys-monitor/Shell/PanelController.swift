@@ -46,6 +46,13 @@ final class PanelController {
 
     private var pinSync: AnyCancellable?
 
+    /// What the panel's views observe. It receives readings only while the
+    /// panel is on screen. Observing the live store directly made a closed
+    /// panel lay itself out and redraw on every tick, which measured about
+    /// 13% of a core in bursts for a window nobody could see.
+    private let panelStore = MetricsStore()
+    private var panelFeed: AnyCancellable?
+
     init(store: MetricsStore, settings: SettingsStore, coordinator: SamplingCoordinator) {
         self.store = store
         self.settings = settings
@@ -67,6 +74,7 @@ final class PanelController {
         removeClickMonitor()
         removeVisibilityObservers()
         panel?.orderOut(nil)
+        panelFeed = nil
         coordinator.enterIdleTier()
     }
 
@@ -87,6 +95,12 @@ final class PanelController {
     private func open() {
         let panel = panel ?? makePanel()
         self.panel = panel
+        // Start feeding the panel before it is shown. A sink on a published
+        // value fires at once with the current reading, so the first frame is
+        // already up to date.
+        panelFeed = store.$snapshot.sink { [weak panelStore] snap in
+            panelStore?.snapshot = snap
+        }
         anchor(panel: panel)
         panel.makeKeyAndOrderFront(nil)
         // Anchoring used the persisted height. If the content needs more, grow
@@ -174,7 +188,7 @@ final class PanelController {
             onResizeDrag: { [weak self] dy in self?.resize(byDragging: dy) },
             onResizeEnd: { [weak self] in self?.commitDraggedHeight() }
         )
-        .environmentObject(store)
+        .environmentObject(panelStore)
         .environmentObject(settings)
         .environmentObject(panelState)
         panel.contentViewController = NSHostingController(rootView: root)

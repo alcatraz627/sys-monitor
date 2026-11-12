@@ -95,6 +95,7 @@ struct PanelRootView: View {
     typealias ProcSort = SettingsStore.ProcSort
 
     @StateObject private var hoverHelp = HoverHelp()
+    @StateObject private var diskUsage = DiskUsageScanner()
     @State private var gripHover = false
 
     var body: some View {
@@ -702,19 +703,66 @@ struct PanelRootView: View {
         if let d = store.snapshot.diskSpace {
             let used = d.totalBytes >= d.freeBytes ? d.totalBytes - d.freeBytes : 0
             let frac = d.totalBytes > 0 ? Double(used) / Double(d.totalBytes) : 0
-            HStack(spacing: DesignTokens.Space.s) {
-                Text("STORAGE")
-                    .font(DesignTokens.numericFont(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                UsageBar(load: frac, height: 6)
-                Spacer()
-                Text("\(formatBytes(Double(d.freeBytes))) free")
-                    .font(DesignTokens.numericFont(size: 10))
-                    .foregroundStyle(.secondary)
+            let expanded = settings.expandedSections.contains(.storage)
+            VStack(alignment: .leading, spacing: DesignTokens.Space.xs) {
+                SectionHeader(expanded: expanded,
+                              onTap: { settings.toggleSection(.storage) }) {
+                    Text("STORAGE")
+                        .font(DesignTokens.numericFont(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    UsageBar(load: frac, height: 6)
+                    Spacer()
+                    Text("\(formatBytes(Double(d.freeBytes))) free")
+                        .font(DesignTokens.numericFont(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(height: 16)
+                .explain("Free space on the boot volume: \(formatBytes(Double(used))) used of \(formatBytes(Double(d.totalBytes))). Expand to see which folders in your home are using it.")
+                if expanded {
+                    storageUsage
+                        .padding(.bottom, DesignTokens.Space.s)
+                        .transition(.opacity)
+                }
             }
-            .frame(height: 16)
-            .explain("Free space on the boot volume — \(formatBytes(Double(used))) used of \(formatBytes(Double(d.totalBytes))).")
+            // Measuring starts when the section is open and the panel is
+            // showing it, and stops if the section is closed part-way.
+            .onAppear { if expanded { diskUsage.scanIfStale() } }
+            .onChange(of: expanded) { open in
+                if open { diskUsage.scanIfStale() } else { diskUsage.cancel() }
+            }
         }
+    }
+
+    /// The largest folders in the home directory, biggest first. Clicking one
+    /// shows it in Finder. Nothing here deletes anything.
+    private var storageUsage: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            ForEach(diskUsage.entries.prefix(6)) { e in
+                Button(action: {
+                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: e.path)])
+                }) {
+                    HStack(spacing: 4) {
+                        Text("~/\(e.name)").lineLimit(1).truncationMode(.middle)
+                        Spacer(minLength: 2)
+                        Text(formatBytes(Double(e.bytes))).foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .explain("\(e.path) uses \(formatBytes(Double(e.bytes))). Click to show it in Finder.")
+            }
+            Text(storageScanStatus)
+                .foregroundStyle(.tertiary)
+                .padding(.top, 1)
+        }
+        .font(DesignTokens.numericFont(size: 10))
+        .animation(panelMotion, value: diskUsage.entries)
+    }
+
+    private var storageScanStatus: String {
+        if let folder = diskUsage.scanning { return "Measuring ~/\(folder)" }
+        if diskUsage.entries.isEmpty { return "No folders could be measured" }
+        return "Largest folders in your home"
     }
 
     /// htop-style load + uptime footer line. Load is threads, not a
@@ -1731,12 +1779,13 @@ private struct ProcessList: View {
             // rate when ranked by disk/network — there's no width for a
             // fourth column at 360 pt, and the value you sorted by is the
             // one you want to read.
+            // Row figures change in place. Rolling them was tried and cost a
+            // blurred redraw of forty numbers per sweep; the four header
+            // figures roll, and rows move only when their rank changes.
             Text(thirdColumnText(p))
-                .rollsOnChange(thirdColumnText(p))
                 .frame(width: 60, alignment: .trailing)
                 .foregroundStyle(sortBy != .mem ? .primary : .secondary)
             Text(formatBytes(Double(p.memBytes)))
-                .rollsOnChange(formatBytes(Double(p.memBytes)))
                 .frame(width: 64, alignment: .trailing)
                 .foregroundStyle(sortBy == .mem ? .primary : .secondary)
             Text(String(p.pid))

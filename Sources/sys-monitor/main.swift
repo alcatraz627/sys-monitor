@@ -332,6 +332,19 @@ MainActor.assumeIsolated {
                                snap: snapshot(reclaim: calm, severity: .normal, pressure: .normal,
                                               warm: false),
                                expanded: [.cpu], sort: .cpu))
+        // Storage opened, with fixed folders: the probe must never start a real
+        // scan of the home directory just to take a picture.
+        DiskUsageScanner.fixture = [
+            .init(path: "/Users/x/Library", name: "Library", bytes: 182 << 30),
+            .init(path: "/Users/x/Code", name: "Code", bytes: 96 << 30),
+            .init(path: "/Users/x/Movies", name: "Movies", bytes: 41 << 30),
+            .init(path: "/Users/x/.cache", name: ".cache", bytes: 23 << 30),
+            .init(path: "/Users/x/Downloads", name: "Downloads", bytes: 9 << 30),
+            .init(path: "/Users/x/Documents", name: "Documents", bytes: 700 << 20),
+        ]
+        cases.append(PanelCase(name: "storage-expanded",
+                               snap: snapshot(reclaim: calm, severity: .normal, pressure: .normal),
+                               expanded: [.storage], sort: .cpu))
         cases.append(PanelCase(name: "zoom-50",
                                snap: snapshot(reclaim: calm, severity: .normal, pressure: .normal),
                                expanded: [], sort: .cpu, zoom: 0.5))
