@@ -150,6 +150,9 @@ struct PanelRootView: View {
         }
         .environmentObject(hoverHelp)
         .padding(DesignTokens.Space.s)
+        // Opening or closing a section moves everything below it, so the move
+        // is animated for the eye to follow.
+        .animation(panelMotion, value: settings.expandedSections)
         // The panel at its natural 360 pt. `body` owns sizing and zoom, because
         // scaling a finished layout carries every raw literal here (a 5 pt heat
         // row, a 3 pt capsule) by construction, and proportions cannot drift.
@@ -183,11 +186,14 @@ struct PanelRootView: View {
                 // Default text color while normal; orange/red at the
                 // same thresholds the bars use.
                 Text(cpuValueText)
+                    .rollsOnChange(cpuValueText)
                     .font(DesignTokens.numericFont(size: 12, weight: .medium))
                     .foregroundStyle(cpuSeverity == .normal
                         ? Color.primary
                         : DesignTokens.severityColor(cpuSeverity))
             }
+            culpritLine(cpuCulprits, sort: .cpu,
+                        help: "The processes using the most CPU right now, as a share of one core. Click to sort the list by CPU.")
             // Sparkline carries "now + recent"; the per-core strip carries
             // distribution. The overall bar was a third encoding of "now"
             // and ate vertical real estate for no extra signal.
@@ -203,6 +209,7 @@ struct PanelRootView: View {
                     // An expansion pushes its own divider a screenful away, so
                     // without this the detail reads as the next section's.
                     .padding(.bottom, DesignTokens.Space.s)
+                    .transition(.opacity)
             }
         }
     }
@@ -216,11 +223,14 @@ struct PanelRootView: View {
                     .explain("Used memory (app + wired + compressed, as Activity Monitor counts it); sparkline shows the last \(Int(settings.historyWindowSeconds)) s, auto-scaled to the corner labels")
                 Spacer()
                 Text(memValueText)
+                    .rollsOnChange(memValueText)
                     .font(DesignTokens.numericFont(size: 12, weight: .medium))
                     .foregroundStyle(memSeverity == .normal
                         ? Color.primary
                         : DesignTokens.severityColor(memSeverity))
             }
+            culpritLine(memCulprits, sort: .mem,
+                        help: "The apps holding the most memory, counting their helper processes. Click to sort the list by memory.")
             // Auto-scale because memory sits in a narrow band; minSpan
             // keeps the trace from amplifying single-percent jitter.
             // Range labels because auto-scale renders a 2% wobble with
@@ -233,6 +243,7 @@ struct PanelRootView: View {
             if settings.expandedSections.contains(.mem) {
                 memoryPoolsView
                     .padding(.bottom, DesignTokens.Space.s)
+                    .transition(.opacity)
             }
             HStack(spacing: DesignTokens.Space.m) {
                 Text("swap \(swapText)")
@@ -252,6 +263,49 @@ struct PanelRootView: View {
             .font(DesignTokens.numericFont(size: 10))
             .foregroundStyle(.secondary)
         }
+    }
+
+    /// Names who is behind a metric, directly under its header, so a high
+    /// reading answers "what is doing this" without a trip to the list.
+    /// Clicking it sorts the process list by that metric.
+    ///
+    /// The line keeps its height when there is nothing to name, so the panel
+    /// does not shift as the first process reading arrives.
+    private func culpritLine(_ entries: [String], sort: ProcSort, help: String) -> some View {
+        Button(action: { setSortBy(sort) }) {
+            Text(entries.isEmpty ? " " : entries.joined(separator: "  ·  "))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .font(DesignTokens.numericFont(size: 10))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(height: 12)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(entries.isEmpty)
+        .explain(help)
+    }
+
+    /// The two busiest processes, skipping anything under 5% of a core so a
+    /// quiet machine names nobody.
+    private var cpuCulprits: [String] {
+        guard case .ok(let list) = store.snapshot.processes else { return [] }
+        return list.filter { $0.cpu >= 0.05 }
+            .sorted { $0.cpu > $1.cpu }
+            .prefix(2)
+            .map { "\(pidDisplayName[$0.pid] ?? $0.name) \(Int(($0.cpu * 100).rounded()))%" }
+    }
+
+    /// The two heaviest apps by memory. Counted as whole process trees,
+    /// because a browser's memory is spread over dozens of helpers and no
+    /// single one of them looks large.
+    private var memCulprits: [String] {
+        guard case .ok(let list) = store.snapshot.processes else { return [] }
+        return ProcGroup.group(list)
+            .sorted { $0.memBytes > $1.memBytes }
+            .prefix(2)
+            .map { "\(pidDisplayName[$0.root.pid] ?? $0.name) \(formatBytes(Double($0.memBytes)))" }
     }
 
     /// Pressure text takes the severity color from the enum: normal stays
@@ -1252,6 +1306,20 @@ private struct PickerWidth: ViewModifier {
     }
 }
 
+extension View {
+    /// Roll a changing figure from its old value to the new one, so a tick
+    /// reads as the number moving rather than being replaced.
+    func rollsOnChange(_ value: String) -> some View {
+        contentTransition(.numericText())
+            .animation(.easeOut(duration: 0.25), value: value)
+    }
+}
+
+/// How long a section takes to open or close, and a row to change place.
+/// Short enough to stay out of the way; long enough for the eye to follow
+/// what moved.
+let panelMotion = Animation.easeInOut(duration: 0.22)
+
 private struct SectionCaret: View {
     let expanded: Bool
 
@@ -1260,6 +1328,7 @@ private struct SectionCaret: View {
             .font(.system(size: 9, weight: .medium))
             .foregroundStyle(.tertiary)
             .rotationEffect(.degrees(expanded ? 90 : 0))
+            .animation(panelMotion, value: expanded)
             .frame(width: 10)
     }
 }
@@ -1326,6 +1395,7 @@ private struct MemoryPoolsView: View {
                         Rectangle()
                             .fill(Color.teal.opacity(opacity))
                             .frame(width: max(0, geo.size.width * Double(bytes) / total))
+                            .animation(.easeInOut(duration: 0.35), value: bytes)
                             .accessibilityLabel(name)
                     }
                 }
@@ -1431,13 +1501,15 @@ private struct ThroughputCell: View {
                     Text("↓")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(arrowColor(base: .systemGreen, bps: inBps))
-                    Text(inText).font(DesignTokens.numericFont(size: 11))
+                    Text(inText).rollsOnChange(inText)
+                        .font(DesignTokens.numericFont(size: 11))
                 }
                 HStack(spacing: 2) {
                     Text("↑")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(arrowColor(base: .systemRed, bps: outBps))
-                    Text(outText).font(DesignTokens.numericFont(size: 11))
+                    Text(outText).rollsOnChange(outText)
+                        .font(DesignTokens.numericFont(size: 11))
                 }
             }
             // Log-scaled activity sparkline (history is shape; the numbers
@@ -1465,6 +1537,7 @@ private struct ThroughputCell: View {
                 }
                 .padding(.top, 1)
                 .padding(.bottom, DesignTokens.Space.s)
+                .transition(.opacity)
                 .explain("The processes behind this number, busiest first. System processes are not counted here, because macOS does not let this app read their disk or network use.")
             }
         }
@@ -1520,19 +1593,34 @@ private struct ProcessList: View {
     @Binding var pidPath: [Int32: String]
     @Binding var pidIcon: [Int32: NSImage]
     @Binding var pidDisplayName: [Int32: String]
+    /// The last list that had rows, shown dimmed while a fresh one is measured.
+    @State private var lastRanked: [ProcSample] = []
 
     var body: some View {
         ScrollView {
             switch metric {
             case .measuring:
-                loadingView
+                // Reopening the panel re-baselines the process rates, which
+                // takes a moment. Holding the last list, dimmed, until the
+                // fresh one lands is steadier than blanking to a message and
+                // back on every open.
+                if lastRanked.isEmpty {
+                    loadingView
+                } else {
+                    listView(lastRanked).padding(.trailing, 10)
+                        .opacity(0.45)
+                        .allowsHitTesting(false)
+                }
             case .unavailable:
                 unavailableView
             case .ok:
                 // Trailing gutter keeps the overlay scrollbar off the PID
                 // column — an occluded pid is a mis-typed kill target.
-                listView.padding(.trailing, 10)
+                listView(ranked).padding(.trailing, 10)
             }
+        }
+        .onChange(of: ranked) { rows in
+            if !rows.isEmpty { lastRanked = rows }
         }
         // Flexible: the process list absorbs whatever height the user
         // drags the panel to (the fixed sections above it don't flex).
@@ -1567,9 +1655,9 @@ private struct ProcessList: View {
         .frame(maxWidth: .infinity, minHeight: 200)
     }
 
-    private var listView: some View {
+    private func listView(_ rows: [ProcSample]) -> some View {
         LazyVStack(spacing: 1) {
-            ForEach(ranked, id: \.pid) { p in
+            ForEach(rows, id: \.pid) { p in
                 let expanded = expandedPids.contains(p.pid)
                 VStack(spacing: 0) {
                     rowView(for: p)
@@ -1592,6 +1680,10 @@ private struct ProcessList: View {
                 )
             }
         }
+        // A row that changes rank slides to its new place instead of
+        // vanishing from one line and appearing on another.
+        .animation(panelMotion, value: rows.map { $0.pid })
+        .animation(panelMotion, value: expandedPids)
     }
 
     private func rowView(for p: ProcSample) -> some View {
@@ -1634,9 +1726,11 @@ private struct ProcessList: View {
             // fourth column at 360 pt, and the value you sorted by is the
             // one you want to read.
             Text(thirdColumnText(p))
+                .rollsOnChange(thirdColumnText(p))
                 .frame(width: 60, alignment: .trailing)
                 .foregroundStyle(sortBy != .mem ? .primary : .secondary)
             Text(formatBytes(Double(p.memBytes)))
+                .rollsOnChange(formatBytes(Double(p.memBytes)))
                 .frame(width: 64, alignment: .trailing)
                 .foregroundStyle(sortBy == .mem ? .primary : .secondary)
             Text(String(p.pid))
