@@ -642,6 +642,12 @@ struct PanelRootView: View {
         if !triedLookup.isSubset(of: livePids) {
             triedLookup.formIntersection(livePids)
         }
+        // A pin is to a process, and a pid is only its number while it lives.
+        // Left stored, a dead pin would attach to whatever process the system
+        // next gives that number to, including after a restart.
+        if !settings.pinnedPids.isSubset(of: livePids) {
+            settings.pinnedPids.formIntersection(livePids)
+        }
         pidPath.keys
             .filter { !livePids.contains($0) }
             .forEach { pidPath.removeValue(forKey: $0) }
