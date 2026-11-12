@@ -132,6 +132,10 @@ if [[ "${INSTALL}" -eq 1 ]]; then
     sleep 0.3
     mkdir -p "$(dirname "${INSTALL_DIR}")"
     rsync -a --delete "${APP_DIR}/" "${INSTALL_DIR}/"
+    # The widget goes into the installed copy only. Two bundles carrying the
+    # same widget would both register it, and macOS would pick one arbitrarily.
+    # A widget that fails to build must not stop the app from installing.
+    Widget/build-widget.sh "${INSTALL_DIR}" || echo "[build] WARN: widget not built; app installed without it"
     codesign --force --sign - "${INSTALL_DIR}" >/dev/null 2>&1 || true
     echo "[build] installed; relaunch with: open ${INSTALL_DIR}"
 fi
